@@ -1,0 +1,39 @@
+feature,area,priority,original,clone,notes
+Haushaltsbuch beim ersten Start anlegen,onboarding,must,yes,yes,
+Mehrere Konten mit Typ Name Inhaber Anfangssaldo,konten,must,yes,yes,
+Kontosalden und Kontenübersicht,konten,must,yes,yes,
+Ausgabe erfassen,buchungen,must,yes,yes,
+Einnahme erfassen,buchungen,must,yes,yes,
+Umbuchung zwischen Konten,buchungen,must,yes,yes,zählt nicht als Ausgabe
+Buchung bearbeiten und löschen,buchungen,must,yes,yes,
+Buchung aufteilen (Split),buchungen,must,yes,yes,
+Buchungsliste mit Kontofilter,buchungen,must,yes,yes,
+Schnelle Suche über alle Buchungen,buchungen,must,yes,yes,
+Kategoriebaum mit Standardkategorien,kategorien,must,yes,yes,
+Automatische Kategorisierung per Regeln,kategorien,must,yes,yes,
+Budgets je Kategorie mit Ist/Soll,budgets,must,yes,yes,
+Dashboard mit Blöcken,dashboard,must,yes,partial,feste Blockanordnung; anpassbar folgt
+Monats- und Jahresübersicht,auswertungen,must,yes,yes,
+Monatsvergleich,auswertungen,must,yes,yes,
+Ausgaben nach Kategorie (Diagramm),auswertungen,should,yes,yes,
+Kontosaldenverlauf,auswertungen,should,yes,yes,
+Was bleibt am Monatsende,auswertungen,should,yes,yes,
+Mehrjahres-Langzeitanalyse,auswertungen,should,yes,yes,
+Sparpotenzial / stärkste Kostenblöcke,auswertungen,should,yes,partial,größte Blöcke und Anstieg ggü. 6-Monats-Schnitt
+Wiederkehrende Kosten erkennen,fixkosten,should,yes,no,
+Belege an Buchungen anhängen,belege,should,yes,no,
+Dokumentenverwaltung für Belege,belege,should,yes,no,
+Lokale Verschlüsselung mit Passwort,sicherheit,should,yes,no,
+Datensicherung und Wiederherstellung,sicherheit,should,yes,partial,"Sicherung als Datei, noch unverschlüsselt"
+Pauschale Erfassung für vergessene Belege,buchungen,should,yes,yes,
+Dashboard-Blöcke hinzufügen und anordnen,dashboard,should,yes,no,
+Schnellerfassung im eigenen Fenster,buchungen,could,yes,partial,Taste N öffnet Erfassung überall
+Steuerkategorie je Kategorie mit Jahressummen,steuer,could,yes,partial,Steuerkategorie pflegbar; Jahressummen folgen
+Favoriten in der Navigation anpassen,oberfläche,could,yes,no,
+Statusleiste mit Meldungsverlauf,oberfläche,could,yes,no,
+CSV-Import von Bankumsätzen,import,could,no,no,eigene Ergänzung (Sparkasse ING DKB Volksbank)
+Export als CSV,export,could,no,yes,eigene Ergänzung
+Steuervorschau mit Einkommensteuerberechnung,steuer,could,yes,skip,gepflegte Steuertabellen; nicht im Umfang
+Informationscenter mit Finanznachrichten,dashboard,could,yes,skip,redaktioneller Inhalt des Anbieters
+Lizenzaktivierung und Updatedienst,system,could,yes,skip,gehört zum Vertrieb des Originals
+Fernwartung und Support,service,could,yes,skip,Dienstleistung des Anbieters

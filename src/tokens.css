@@ -1,0 +1,18 @@
+/* generiert aus replica/design/tokens.json */
+:root {
+  --c-bg: 251 250 247;
+  --c-surface: 255 255 255;
+  --c-surface-2: 242 239 232;
+  --c-border: 226 221 210;
+  --c-border-input: 138 132 120;
+  --c-text: 29 35 33;
+  --c-text-muted: 92 99 95;
+  --c-accent: 15 107 99;
+  --c-accent-soft: 220 239 235;
+  --c-on-accent: 255 255 255;
+  --c-income: 28 122 69;
+  --c-expense: 180 54 31;
+  --c-danger: 180 35 24;
+  --c-warning: 138 90 0;
+  --c-success: 28 122 69;
+}
