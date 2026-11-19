@@ -70,6 +70,8 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
       {done ? (
         <div className="text-sm space-y-2">
           <p>{done.imported} Buchungen wurden übernommen{done.transfers ? `, davon ${done.transfers} als Umbuchung` : ''}.</p>
+          {done.autoCreated > 0 && <p>{done.autoCreated} Gegenbuchungen wurden in anderen eigenen Konten automatisch ergänzt.</p>}
+          {done.replaced > 0 && <p>{done.replaced} automatisch ergänzte Gegenbuchungen wurden durch die Buchungen der Bank ersetzt.</p>}
           <p>Kontostand jetzt: <strong><Money cents={done.balance} colored={false} /></strong>
             {st?.endBalance != null && (done.balance === st.endBalance ? ' – stimmt mit dem Saldo der Bank überein.' : ` (laut Bank ${formatCents(st.endBalance)})`)}</p>
         </div>
@@ -94,6 +96,8 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
               <ul className="space-y-1">
                 <li><strong>{plan.newCount}</strong> neue Buchungen, davon {plan.categorized} mit Kategorie und {plan.contracts} einem Vertrag zugeordnet</li>
                 {plan.transfers > 0 && <li><strong>{plan.transfers}</strong> Überweisungen zwischen eigenen Konten werden als Umbuchung mit der schon vorhandenen Gegenbuchung verknüpft (zählen nicht als Einnahme oder Ausgabe)</li>}
+                {plan.autoCounterparts > 0 && <li><strong>{plan.autoCounterparts}</strong> Überweisungen an eigene Konten ohne passende Gegenbuchung: Die Gegenbuchung wird dort automatisch ergänzt</li>}
+                {plan.replaced > 0 && <li><strong>{plan.replaced}</strong> automatisch ergänzte Gegenbuchungen werden durch die echte Buchung ersetzt</li>}
                 {plan.depot > 0 && <li><strong>{plan.depot}</strong> Wertpapierkäufe und -verkäufe werden als Umbuchung zum Depot „{plan.depotName}“ erfasst</li>}
                 {plan.duplicates > 0 && <li><strong>{plan.duplicates}</strong> schon importiert, werden übersprungen</li>}
                 {plan.possible > 0 && (

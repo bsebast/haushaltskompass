@@ -107,6 +107,10 @@ export interface Transaction {
   category_color: string | null;
   transfer_id: string | null;
   recurring_id: string | null;
+  /** IBAN der Gegenseite laut Bank */
+  counter_iban?: string | null;
+  /** 1 = Gegenbuchung wurde automatisch angelegt und wird beim Import des Gegenkontos ersetzt */
+  auto_counterpart?: number;
   is_lump_sum: number;
   split_count: number;
   doc_count: number;

@@ -284,6 +284,8 @@ export interface TxInput {
   splits?: Split[];
   is_lump_sum?: boolean;
   import_hash?: string | null;
+  /** IBAN der Gegenseite laut Bank (nur beim Anlegen) */
+  counter_iban?: string | null;
   /** Vertrag, zu dem die Buchung gehört (nur beim Anlegen) */
   recurring_id?: string | null;
   /** Regeln anwenden, wenn keine Kategorie gesetzt ist (Standard: ja) */
@@ -321,9 +323,10 @@ export function saveTransaction(b: Book, t: TxInput): string {
     } else {
       id = uid();
       b.run(
-        `insert into transactions (id, account_id, date, amount, payee, purpose, note, category_id, is_lump_sum, import_hash, recurring_id, created_at, updated_at)
-         values (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, t.account_id, t.date, t.amount, t.payee ?? null, t.purpose ?? null, t.note ?? null, category, t.is_lump_sum ? 1 : 0, t.import_hash ?? null, t.recurring_id ?? null, ts, ts],
+        `insert into transactions (id, account_id, date, amount, payee, purpose, note, category_id, is_lump_sum, import_hash, recurring_id, counter_iban, created_at, updated_at)
+         values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, t.account_id, t.date, t.amount, t.payee ?? null, t.purpose ?? null, t.note ?? null, category, t.is_lump_sum ? 1 : 0, t.import_hash ?? null, t.recurring_id ?? null,
+          t.counter_iban?.replace(/\s/g, '').toUpperCase() || null, ts, ts],
       );
     }
     for (const s of splits) {
@@ -347,17 +350,130 @@ export function saveTransfer(b: Book, t: TransferInput): string {
   if (!Number.isInteger(t.amount) || t.amount <= 0) throw new Error('Bitte einen positiven Betrag eingeben.');
   const accts = new Map(listAccounts(b, true).map((a) => [a.id, a.name]));
   const ts = now();
+  const label = (amount: number, other: string) => `Umbuchung ${amount < 0 ? 'an' : 'von'} ${accts.get(other) ?? ''}`.trim();
   return b.tx(() => {
     const tid = t.transfer_id ?? uid();
+    const rows = t.transfer_id
+      ? b.all<{ id: string; amount: number; import_hash: string | null }>('select id, amount, import_hash from transactions where transfer_id = ?', [tid])
+      : [];
+    const from = rows.find((r) => r.amount < 0);
+    const to = rows.find((r) => r.amount > 0);
+    if (rows.length === 2 && from && to) {
+      // vorhandene Seiten anpassen, damit importierte Buchungen ihren Fingerabdruck behalten
+      const upd = (r: { id: string; import_hash: string | null }, acc: string, amount: number, other: string) => b.run(
+        `update transactions set account_id = ?, date = ?, amount = ?, note = ?, category_id = null, updated_at = ?,
+           payee = case when import_hash is null then ? else payee end where id = ?`,
+        [acc, t.date, amount, t.note ?? null, ts, label(amount, other), r.id]);
+      upd(from, t.from_account, -t.amount, t.to_account);
+      upd(to, t.to_account, t.amount, t.from_account);
+      return tid;
+    }
     b.run('delete from transactions where transfer_id = ?', [tid]);
     const ins = (acc: string, amount: number, other: string) =>
       b.run(
         `insert into transactions (id, account_id, date, amount, payee, note, transfer_id, created_at, updated_at) values (?,?,?,?,?,?,?,?,?)`,
-        [uid(), acc, t.date, amount, `Umbuchung ${amount < 0 ? 'an' : 'von'} ${accts.get(other) ?? ''}`.trim(), t.note ?? null, tid, ts, ts],
+        [uid(), acc, t.date, amount, label(amount, other), t.note ?? null, tid, ts, ts],
       );
     ins(t.from_account, -t.amount, t.to_account);
     ins(t.to_account, t.amount, t.from_account);
     return tid;
+  });
+}
+
+/** Hinweis an automatisch angelegten Gegenbuchungen */
+export const AUTO_COUNTERPART_NOTE = 'Gegenbuchung automatisch ergänzt';
+
+/**
+ * Macht eine vorhandene Buchung zur Umbuchung mit einem anderen eigenen Konto: Gibt es dort eine passende
+ * Gegenbuchung (gleicher Betrag mit anderem Vorzeichen, höchstens 4 Tage Abstand), wird sie verknüpft,
+ * sonst wird sie angelegt und markiert, damit ein späterer Import des Gegenkontos sie ersetzt.
+ */
+export function linkCounterpart(b: Book, txId: string, otherAccountId: string, opts: { create?: boolean } = {}): { counterpartId: string; created: boolean } | null {
+  return b.tx(() => {
+    const tx = b.get<{ id: string; account_id: string; date: string; amount: number; payee: string | null; purpose: string | null; transfer_id: string | null }>(
+      'select id, account_id, date, amount, payee, purpose, transfer_id from transactions where id = ?', [txId]);
+    if (!tx) throw new Error('Buchung nicht gefunden.');
+    if (tx.account_id === otherAccountId) throw new Error('Quell- und Zielkonto müssen verschieden sein.');
+    if (tx.transfer_id) return null;
+    const ts = now();
+    const m = b.get<{ id: string }>(
+      `select id from transactions where account_id = ? and transfer_id is null and amount = ?
+         and abs(julianday(date) - julianday(?)) <= 4 order by abs(julianday(date) - julianday(?)), date limit 1`,
+      [otherAccountId, -tx.amount, tx.date, tx.date]);
+    const tid = uid();
+    let counterpartId: string;
+    let created = false;
+    if (m) {
+      counterpartId = m.id;
+      b.run('update transactions set transfer_id = ?, category_id = null, recurring_id = null, updated_at = ? where id = ?', [tid, ts, m.id]);
+      b.run('delete from splits where transaction_id = ?', [m.id]);
+    } else {
+      if (opts.create === false) return null;
+      counterpartId = uid();
+      created = true;
+      b.run(
+        `insert into transactions (id, account_id, date, amount, payee, purpose, note, transfer_id, auto_counterpart, created_at, updated_at)
+         values (?,?,?,?,?,?,?,?,1,?,?)`,
+        [counterpartId, otherAccountId, tx.date, -tx.amount, tx.payee, tx.purpose, AUTO_COUNTERPART_NOTE, tid, ts, ts]);
+    }
+    b.run('update transactions set transfer_id = ?, category_id = null, recurring_id = null, updated_at = ? where id = ?', [tid, ts, tx.id]);
+    b.run('delete from splits where transaction_id = ?', [tx.id]);
+    return { counterpartId, created };
+  });
+}
+
+export interface MissingCounterpart {
+  txId: string; accountId: string; accountName: string; date: string; amount: number; payee: string | null;
+  targetId: string; targetName: string; action: 'link' | 'create' | 'skip'; reason: string | null;
+}
+
+/** Zeitraum, für den ein Konto Buchungen aus einem Bankimport hat */
+function importRange(b: Book, accountId: string): { from: string; to: string } | null {
+  const r = b.get<{ f: string | null; t: string | null }>("select min(date) f, max(date) t from transactions where account_id = ? and import_hash like 'bank:%'", [accountId]);
+  return r?.f && r.t ? { from: r.f, to: r.t } : null;
+}
+
+/**
+ * Sucht Buchungen, deren Gegenseite laut Bank ein eigenes Konto ist (IBAN), die aber noch nicht als Umbuchung verknüpft sind.
+ * Ist das Gegenkonto für den Tag schon per Bankimport erfasst, fehlt dort aber die Buchung, wird nichts angelegt
+ * (sonst stimmte der Kontostand nicht mehr mit der Bank überein).
+ */
+export function findMissingCounterparts(b: Book): MissingCounterpart[] {
+  const accts = listAccounts(b, true);
+  const byIban = new Map(accts.filter((a) => a.iban).map((a) => [a.iban!.replace(/\s/g, '').toUpperCase(), a]));
+  const name = (id: string) => { const a = accts.find((x) => x.id === id); return a ? `${a.bank ? `${a.bank} · ` : ''}${a.name}` : ''; };
+  const rows = b.all<{ id: string; account_id: string; date: string; amount: number; payee: string | null; counter_iban: string }>(
+    'select id, account_id, date, amount, payee, counter_iban from transactions where transfer_id is null and counter_iban is not null order by date');
+  const out: MissingCounterpart[] = [];
+  const ranges = new Map<string, { from: string; to: string } | null>();
+  const claimed = new Set<string>();
+  for (const r of rows) {
+    const target = byIban.get(r.counter_iban);
+    if (!target || target.id === r.account_id) continue;
+    const base = { txId: r.id, accountId: r.account_id, accountName: name(r.account_id), date: r.date, amount: r.amount, payee: r.payee, targetId: target.id, targetName: name(target.id) };
+    const m = b.all<{ id: string }>(
+      `select id from transactions where account_id = ? and transfer_id is null and amount = ? and abs(julianday(date) - julianday(?)) <= 4
+       order by abs(julianday(date) - julianday(?))`, [target.id, -r.amount, r.date, r.date]).find((x) => !claimed.has(x.id));
+    if (m) { claimed.add(m.id); out.push({ ...base, action: 'link', reason: null }); continue; }
+    if (!ranges.has(target.id)) ranges.set(target.id, importRange(b, target.id));
+    const range = ranges.get(target.id);
+    if (range && r.date >= range.from && r.date <= range.to) {
+      out.push({ ...base, action: 'skip', reason: 'Im Gegenkonto ist dieser Zeitraum schon per Bankimport erfasst, die Buchung fehlt dort aber.' });
+    } else out.push({ ...base, action: 'create', reason: null });
+  }
+  return out;
+}
+
+/** Verknüpft bzw. legt die gefundenen Gegenbuchungen an. Gibt die Anzahl verknüpfter und neu angelegter zurück. */
+export function applyMissingCounterparts(b: Book, items: MissingCounterpart[]): { linked: number; created: number } {
+  return b.tx(() => {
+    let linked = 0; let created = 0;
+    for (const it of items) {
+      if (it.action === 'skip') continue;
+      const r = linkCounterpart(b, it.txId, it.targetId, { create: it.action === 'create' });
+      if (r?.created) created++; else if (r) linked++;
+    }
+    return { linked, created };
   });
 }
 

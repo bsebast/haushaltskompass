@@ -1,7 +1,7 @@
 import Papa from 'papaparse';
 import type { Book } from './core';
 import type { Rule } from './types';
-import { listAccounts, listCategories, listRules, listSnapshots, saveAccount, saveRule, saveSnapshot, saveTransaction } from './repo';
+import { AUTO_COUNTERPART_NOTE, listAccounts, listCategories, listRules, listSnapshots, saveAccount, saveRule, saveSnapshot, saveTransaction } from './repo';
 import { findCategory } from './rules';
 import { listContracts, findCategoryByLabel, type Contract } from './contracts';
 import { parseAmount } from '../lib/money';
@@ -320,7 +320,8 @@ export function suggestAccount(b: Book, st: BankStatement): string | null {
   return null;
 }
 
-export type RowStatus = 'new' | 'duplicate' | 'possible';
+/** replace: ersetzt eine automatisch angelegte Gegenbuchung durch die echte Buchung der Bank */
+export type RowStatus = 'new' | 'duplicate' | 'possible' | 'replace';
 
 export interface PlannedRow extends BankRow {
   status: RowStatus;
@@ -328,10 +329,10 @@ export interface PlannedRow extends BankRow {
   categorySource: 'rule' | 'contract' | null;
   contractId: string | null;
   contractName: string | null;
-  /** bei möglicher Dublette: die vorhandene Buchung */
-  match: { date: string; payee: string | null } | null;
+  /** bei möglicher Dublette oder Ersatz: die vorhandene Buchung */
+  match: { id?: string; date: string; payee: string | null } | null;
   /** wird als Umbuchung erfasst: mit einer vorhandenen Gegenbuchung (txId) oder mit einer neuen im Depot */
-  transfer: { accountId: string; accountName: string; txId: string | null; date: string } | null;
+  transfer: { accountId: string; accountName: string; txId: string | null; date: string; auto?: boolean } | null;
 }
 
 export interface BankPlan {
@@ -346,6 +347,10 @@ export interface BankPlan {
   /** Wertpapierkäufe und -verkäufe, als Umbuchung zum Depot */
   depot: number;
   depotName: string | null;
+  /** automatisch ergänzte Gegenbuchungen, die jetzt durch die echte Buchung ersetzt werden */
+  replaced: number;
+  /** Überweisungen an eigene Konten, deren Gegenbuchung automatisch angelegt wird */
+  autoCounterparts: number;
   /** vorhandene Kontostände im Zeitraum, die vom Saldo der Bank abweichen */
   snapshotFixes: { date: string; old: number; bank: number }[];
 }
@@ -420,7 +425,21 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
       [accountId, st.from, st.to])
     : [];
   const hashes = new Set(existing.map((t) => t.import_hash).filter(Boolean));
-  const loose = existing.filter((t) => !t.import_hash?.startsWith('bank:'));
+  const autos = accountId
+    ? b.all<{ id: string; date: string; amount: number; payee: string | null }>(
+      `select id, date, amount, payee from transactions where account_id = ? and auto_counterpart = 1
+       and date between date(?, '-4 days') and date(?, '+4 days')`, [accountId, st.from, st.to])
+    : [];
+  const usedAuto = new Set<string>();
+  // Zeitraum, den ein Gegenkonto schon per Bankimport abdeckt: dort wird keine Gegenbuchung erfunden
+  const coverage = new Map<string, { f: string | null; t: string | null } | undefined>();
+  const covered = (acc: string, date: string) => {
+    if (!coverage.has(acc)) coverage.set(acc, b.get<{ f: string | null; t: string | null }>("select min(date) f, max(date) t from transactions where account_id = ? and import_hash like 'bank:%'", [acc]));
+    const c = coverage.get(acc);
+    return !!(c?.f && c.t && date >= c.f && date <= c.t);
+  };
+  const autoIds = new Set(autos.map((t) => t.id));
+  const loose = existing.filter((t) => !t.import_hash?.startsWith('bank:') && !autoIds.has(t.id));
   const used = new Set<string>();
   // eigene Konten für Umbuchungen
   const accts = listAccounts(b, true);
@@ -454,7 +473,10 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
   const rows: PlannedRow[] = st.rows.map((r) => {
     let status: RowStatus = 'new';
     let match: PlannedRow['match'] = null;
+    const auto = hashes.has(r.hash) ? undefined
+      : autos.filter((t) => !usedAuto.has(t.id) && t.amount === r.amount && dayDiff(t.date, r.date) <= 4).sort((x, y) => dayDiff(x.date, r.date) - dayDiff(y.date, r.date))[0];
     if (hashes.has(r.hash)) status = 'duplicate';
+    else if (auto) { usedAuto.add(auto.id); status = 'replace'; match = { id: auto.id, date: auto.date, payee: auto.payee }; }
     else {
       const m = loose.find((t) => !used.has(t.id) && t.amount === r.amount && dayDiff(t.date, r.date) <= 3);
       if (m) { used.add(m.id); status = 'possible'; match = { date: m.date, payee: m.payee }; }
@@ -476,6 +498,9 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
           usedCounter.add(m.id);
           const a = accts.find((x) => x.id === m.account_id)!;
           transfer = { accountId: a.id, accountName: a.name, txId: m.id, date: m.date };
+        } else if (own && !covered(own.id, r.date)) {
+          // Gegenkonto laut IBAN eindeutig, dort fehlt die Buchung noch: wird automatisch ergänzt
+          transfer = { accountId: own.id, accountName: own.name, txId: null, date: r.date, auto: true };
         }
       }
     }
@@ -501,11 +526,13 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
     rows, snapshotFixes,
     newCount: fresh.length,
     duplicates: rows.filter((r) => r.status === 'duplicate').length,
+    replaced: rows.filter((r) => r.status === 'replace').length,
+    autoCounterparts: fresh.filter((r) => r.transfer?.auto).length,
     possible: rows.filter((r) => r.status === 'possible').length,
     categorized: fresh.filter((r) => r.categoryId).length,
     contracts: fresh.filter((r) => r.contractId).length,
     transfers: fresh.filter((r) => r.transfer?.txId).length,
-    depot: fresh.filter((r) => r.transfer && !r.transfer.txId).length,
+    depot: fresh.filter((r) => r.transfer && !r.transfer.txId && !r.transfer.auto).length,
     depotName: depot ? `${depot.name}${depot.owner ? ` · ${depot.owner}` : ''}` : null,
   };
 }
@@ -525,6 +552,10 @@ export interface BankCommitResult {
   snapshots: number;
   balance: number;
   transfers: number;
+  /** automatisch ergänzte Gegenbuchungen, die durch die Bankbuchung ersetzt wurden */
+  replaced: number;
+  /** neu angelegte Gegenbuchungen in anderen eigenen Konten */
+  autoCreated: number;
 }
 
 /** Übernimmt die Buchungen in einer Transaktion und gleicht die Kontostände mit dem Saldo der Bank ab. */
@@ -554,11 +585,25 @@ export function commitBankImport(b: Book, st: BankStatement, opts: BankCommitOpt
     const plan = planBankImport(b, st, accountId, opts.extraRules);
     let imported = 0;
     let transfers = 0;
+    let replaced = 0;
+    let autoCreated = 0;
     for (const r of plan.rows) {
-      if (r.status === 'duplicate' || (r.status === 'possible' && !opts.includePossible)) continue;
+      if (r.status === 'duplicate') {
+        // ältere Importe ohne Gegen-IBAN nachtragen, damit fehlende Gegenbuchungen gefunden werden
+        if (r.counterIban) b.run('update transactions set counter_iban = ? where account_id = ? and import_hash = ? and counter_iban is null', [r.counterIban.toUpperCase(), accountId, r.hash]);
+        continue;
+      }
+      if (r.status === 'replace') {
+        // automatisch ergänzte Gegenbuchung wird zur echten Bankbuchung, die Verknüpfung bleibt
+        b.run(`update transactions set date = ?, payee = ?, purpose = ?, note = null, import_hash = ?, counter_iban = ?, auto_counterpart = 0, updated_at = ? where id = ?`,
+          [r.date, r.payee, r.purpose || null, r.hash, r.counterIban?.toUpperCase() ?? null, new Date().toISOString(), r.match!.id!]);
+        replaced++;
+        continue;
+      }
+      if (r.status === 'possible' && !opts.includePossible) continue;
       const id = saveTransaction(b, {
         account_id: accountId, date: r.date, amount: r.amount, payee: r.payee, purpose: r.purpose || null,
-        category_id: r.categoryId, autoCategorize: false, import_hash: r.hash, recurring_id: r.contractId,
+        category_id: r.categoryId, autoCategorize: false, import_hash: r.hash, recurring_id: r.contractId, counter_iban: r.counterIban,
       });
       if (r.transfer) {
         const t = uid();
@@ -569,8 +614,10 @@ export function commitBankImport(b: Book, st: BankStatement, opts: BankCommitOpt
         } else {
           const other = saveTransaction(b, {
             account_id: r.transfer.accountId, date: r.date, amount: -r.amount, payee: r.payee, purpose: r.purpose || null, autoCategorize: false,
+            note: r.transfer.auto ? AUTO_COUNTERPART_NOTE : null,
           });
-          b.run('update transactions set transfer_id = ?, category_id = null where id = ?', [t, other]);
+          b.run('update transactions set transfer_id = ?, category_id = null, auto_counterpart = 1 where id = ?', [t, other]);
+          if (r.transfer.auto) autoCreated++;
         }
         transfers++;
       }
@@ -591,6 +638,6 @@ export function commitBankImport(b: Book, st: BankStatement, opts: BankCommitOpt
       }
     }
     const balance = listAccounts(b, true).find((a) => a.id === accountId)!.balance;
-    return { accountId, imported, snapshots, balance, transfers };
+    return { accountId, imported, snapshots, balance, transfers, replaced, autoCreated };
   });
 }

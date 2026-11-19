@@ -5,7 +5,7 @@ import { Modal, Field, ErrorNote, Money } from './ui';
 import AmountInput from './AmountInput';
 import CategorySelect from './CategorySelect';
 import {
-  listAccounts, saveTransaction, saveTransfer, getSplits, getTransfer, deleteTransaction, payeeSuggestions,
+  listAccounts, saveTransaction, saveTransfer, linkCounterpart, getSplits, getTransfer, deleteTransaction, payeeSuggestions,
 } from '../db/repo';
 import type { Transaction } from '../db/types';
 import { today, parseDate, formatDate } from '../lib/dates';
@@ -50,7 +50,11 @@ export default function TxDialog({ onClose, edit, initialMode = 'expense', initi
       if (!date) throw new Error('Bitte ein gültiges Datum eingeben (TT.MM.JJJJ).');
       if (!amount) throw new Error('Bitte einen Betrag eingeben.');
       if (!accountId) throw new Error('Bitte zuerst ein Konto anlegen.');
-      if (mode === 'transfer') {
+      if (mode === 'transfer' && edit && !edit.transfer_id) {
+        // vorhandene Buchung wird zur Umbuchung: Gegenbuchung im anderen Konto verknüpfen oder anlegen
+        if (accountId !== edit.account_id && toAccount !== edit.account_id) throw new Error('Eines der beiden Konten muss das Konto der Buchung sein.');
+        linkCounterpart(book, edit.id, accountId === edit.account_id ? toAccount : accountId);
+      } else if (mode === 'transfer') {
         saveTransfer(book, { transfer_id: transfer?.transfer_id, from_account: accountId, to_account: toAccount, date, amount, note: note || null });
       } else {
         const sign = mode === 'expense' ? -1 : 1;

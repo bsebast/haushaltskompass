@@ -5,7 +5,7 @@ import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Modal, Field, ErrorNote, Empty } from '../components/ui';
 import AmountInput from '../components/AmountInput';
 import { BalanceChart } from '../components/charts';
-import { listAccounts, saveAccount, deleteAccount, deletePerson, personSummary, listSnapshots, saveSnapshot, deleteSnapshot } from '../db/repo';
+import { listAccounts, saveAccount, deleteAccount, deletePerson, personSummary, findMissingCounterparts, applyMissingCounterparts, type MissingCounterpart, listSnapshots, saveSnapshot, deleteSnapshot } from '../db/repo';
 import { balanceTrend } from '../db/reports';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../db/types';
 import { useTxDialog } from '../components/Layout';
@@ -18,6 +18,7 @@ export default function Accounts() {
   const [owner, setOwner] = useState<string | null>(null); // null = alle
   const [edit, setEdit] = useState<Account | 'new' | null>(null);
   const [history, setHistory] = useState<Account | null>(null);
+  const [missing, setMissing] = useState<MissingCounterpart[] | null>(null);
   const { openNew } = useTxDialog();
   const book = useBook();
   const removePerson = (o: string) => {
@@ -36,6 +37,7 @@ export default function Accounts() {
     <>
       <PageHeader title="Konten" subtitle={`${shown.filter((a) => !a.archived).length} aktive Konten`} actions={
         <>
+          <button className="btn-secondary" onClick={() => setMissing(findMissingCounterparts(book))}>Fehlende Gegenbuchungen ergänzen</button>
           <button className="btn-secondary" onClick={() => openNew('transfer')}>Umbuchung</button>
           <button className="btn-primary" onClick={() => setEdit('new')}><Plus size={16} />Konto anlegen</button>
         </>
@@ -98,6 +100,7 @@ export default function Accounts() {
       <label className="flex items-center gap-2 text-sm text-text-muted mt-3">
         <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archivierte Konten zeigen
       </label>
+      {missing && <MissingDialog items={missing} onClose={() => setMissing(null)} />}
       {edit && <AccountDialog account={edit === 'new' ? null : edit} onClose={() => setEdit(null)} owners={owners.filter(Boolean)} />}
       {history && <HistoryDialog account={history} onClose={() => setHistory(null)} />}
     </>
@@ -216,6 +219,49 @@ function AccountDialog({ account, onClose, owners }: { account: Account | null; 
         <button type="submit" hidden />
         <ErrorNote error={error} />
       </form>
+    </Modal>
+  );
+}
+
+function MissingDialog({ items, onClose }: { items: MissingCounterpart[]; onClose: () => void }) {
+  const book = useBook();
+  const [done, setDone] = useState<{ linked: number; created: number } | null>(null);
+  const todo = items.filter((i) => i.action !== 'skip');
+  const skipped = items.filter((i) => i.action === 'skip');
+  const label = { link: 'verknüpfen', create: 'anlegen', skip: 'nicht möglich' } as const;
+  return (
+    <Modal title="Fehlende Gegenbuchungen" onClose={onClose} wide footer={
+      done ? <button className="btn-primary" onClick={onClose}>Fertig</button> : (
+        <>
+          <button className="btn-secondary" onClick={onClose}>Abbrechen</button>
+          <button className="btn-primary" disabled={!todo.length} onClick={() => setDone(applyMissingCounterparts(book, todo))}>{todo.length} Gegenbuchungen ergänzen</button>
+        </>
+      )
+    }>
+      {done ? (
+        <p className="text-sm">{done.linked} Buchungen wurden mit einer vorhandenen Gegenbuchung verknüpft, {done.created} Gegenbuchungen neu angelegt. Neu angelegte sind als „automatisch ergänzt“ markiert und werden beim nächsten Import des Gegenkontos durch die Buchung der Bank ersetzt.</p>
+      ) : (
+        <div className="space-y-3 text-sm">
+          <p className="text-text-muted">Gesucht werden Buchungen, deren Gegenseite laut Bank (IBAN) ein eigenes Konto ist, die aber noch nicht als Umbuchung erfasst sind.</p>
+          {!items.length && <p>Alle Überweisungen zwischen eigenen Konten haben schon eine Gegenbuchung.</p>}
+          {items.length > 0 && (
+            <div className="max-h-96 overflow-auto rounded-md border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-surface-2 text-left"><tr><th className="px-2 py-1">Datum</th><th className="px-2 py-1">Konto</th><th className="px-2 py-1">Gegenkonto</th><th className="px-2 py-1 text-right">Betrag</th><th className="px-2 py-1">Aktion</th></tr></thead>
+                <tbody>
+                  {items.map((i) => (
+                    <tr key={i.txId} className={`border-t border-border ${i.action === 'skip' ? 'text-text-muted' : ''}`} title={i.reason ?? undefined}>
+                      <td className="px-2 py-1 whitespace-nowrap">{formatDate(i.date)}</td><td className="px-2 py-1">{i.accountName}</td><td className="px-2 py-1">{i.targetName}</td>
+                      <td className="px-2 py-1 text-right"><Money cents={i.amount} /></td><td className="px-2 py-1">{label[i.action]}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {skipped.length > 0 && <p className="text-warning">{skipped.length} Buchungen werden nicht ergänzt: Im Gegenkonto ist der Zeitraum schon per Bankimport erfasst, die Buchung fehlt dort aber. Bitte prüfen.</p>}
+        </div>
+      )}
     </Modal>
   );
 }
