@@ -212,7 +212,7 @@ function pick(row: Record<string, string>, key: keyof typeof COLS): string {
   return '';
 }
 
-function findCategory(cats: Category[], label: string): Category | null {
+export function findCategoryByLabel(cats: Category[], label: string): Category | null {
   const flat = flattenTree(categoryTree(cats));
   const norm = (s: string) => s.toLowerCase().replace(/\s*(›|>|\/)\s*/g, ' › ').trim();
   const l = norm(label);
@@ -232,7 +232,7 @@ export function parseContractsCsv(b: Book, text: string): ImportRow[] {
     const interval = parseInterval(pick(row, 'interval'));
     const due = parseDue(pick(row, 'due'));
     const categoryLabel = pick(row, 'category') || null;
-    const cat = categoryLabel ? findCategory(cats, categoryLabel) : null;
+    const cat = categoryLabel ? findCategoryByLabel(cats, categoryLabel) : null;
     const amount = parsedAmount == null ? 0 : (isIncome ? 1 : -1) * Math.abs(parsedAmount);
     const input: ContractInput = {
       name, person: pick(row, 'person') || null, purpose: pick(row, 'purpose') || null, kind: pick(row, 'kind') || null,
@@ -256,12 +256,12 @@ export function contractKey(name: string, person: string | null | undefined, pur
 /** Kategorie per Bezeichnung finden oder anlegen ("Ober › Unter" legt beide Ebenen an). */
 export function resolveCategory(b: Book, label: string | null | undefined, kind: 'income' | 'expense'): string | null {
   if (!label) return null;
-  const found = findCategory(listCategories(b), label);
+  const found = findCategoryByLabel(listCategories(b), label);
   if (found) return found.id;
   const parts = label.split(/\s*(?:›|>|\/)\s*/).filter(Boolean);
   let parent: string | null = null;
   for (let k = 0; k < parts.length; k++) {
-    const hit = findCategory(listCategories(b), parts.slice(0, k + 1).join(' › '));
+    const hit = findCategoryByLabel(listCategories(b), parts.slice(0, k + 1).join(' › '));
     parent = hit ? hit.id : saveCategory(b, { name: parts[k], kind, parent_id: parent });
   }
   return parent;

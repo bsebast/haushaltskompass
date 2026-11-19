@@ -253,6 +253,8 @@ export interface TxInput {
   splits?: Split[];
   is_lump_sum?: boolean;
   import_hash?: string | null;
+  /** Vertrag, zu dem die Buchung gehört (nur beim Anlegen) */
+  recurring_id?: string | null;
   /** Regeln anwenden, wenn keine Kategorie gesetzt ist (Standard: ja) */
   autoCategorize?: boolean;
 }
@@ -288,9 +290,9 @@ export function saveTransaction(b: Book, t: TxInput): string {
     } else {
       id = uid();
       b.run(
-        `insert into transactions (id, account_id, date, amount, payee, purpose, note, category_id, is_lump_sum, import_hash, created_at, updated_at)
-         values (?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [id, t.account_id, t.date, t.amount, t.payee ?? null, t.purpose ?? null, t.note ?? null, category, t.is_lump_sum ? 1 : 0, t.import_hash ?? null, ts, ts],
+        `insert into transactions (id, account_id, date, amount, payee, purpose, note, category_id, is_lump_sum, import_hash, recurring_id, created_at, updated_at)
+         values (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [id, t.account_id, t.date, t.amount, t.payee ?? null, t.purpose ?? null, t.note ?? null, category, t.is_lump_sum ? 1 : 0, t.import_hash ?? null, t.recurring_id ?? null, ts, ts],
       );
     }
     for (const s of splits) {

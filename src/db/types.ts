@@ -106,6 +106,7 @@ export interface Transaction {
   category_name: string | null;
   category_color: string | null;
   transfer_id: string | null;
+  recurring_id: string | null;
   is_lump_sum: number;
   split_count: number;
   doc_count: number;

@@ -6,6 +6,7 @@ import CategorySelect from '../components/CategorySelect';
 import { listRules, saveRule, deleteRule, applyRulesToUncategorized, listCategories, listTransactions } from '../db/repo';
 import { ruleMatches } from '../db/rules';
 import type { Rule } from '../db/types';
+import { addSuggestedRules, pendingSuggestedRules } from '../db/ruleSuggestions';
 
 const FIELDS: Record<Rule['field'], string> = { any: 'Empfänger oder Zweck', payee: 'Empfänger', purpose: 'Verwendungszweck' };
 const OPS: Record<Rule['op'], string> = { contains: 'enthält', equals: 'ist genau', starts_with: 'beginnt mit', regex: 'passt zu Muster' };
@@ -15,6 +16,7 @@ export default function Rules() {
   const rules = useQuery(listRules);
   const cats = useQuery(listCategories);
   const open = useQuery((b) => listTransactions(b, { uncategorized: true }));
+  const suggestions = useQuery((b) => pendingSuggestedRules(b).length);
   const [field, setField] = useState<Rule['field']>('any');
   const [op, setOp] = useState<Rule['op']>('contains');
   const [value, setValue] = useState('');
@@ -37,9 +39,16 @@ export default function Rules() {
   return (
     <>
       <PageHeader title="Regeln" subtitle="Neue und importierte Buchungen ohne Kategorie werden automatisch nach diesen Regeln zugeordnet." actions={
-        <button className="btn-secondary" disabled={!open.length} onClick={() => setInfo(`${applyRulesToUncategorized(book)} Buchungen zugeordnet.`)}>
-          <Wand2 size={16} />Auf {open.length} offene Buchungen anwenden
-        </button>
+        <>
+          {suggestions > 0 && (
+            <button className="btn-secondary" onClick={() => setInfo(`${addSuggestedRules(book)} Vorschlagsregeln angelegt.`)}>
+              <Plus size={16} />{suggestions} Vorschlagsregeln anlegen
+            </button>
+          )}
+          <button className="btn-secondary" disabled={!open.length} onClick={() => setInfo(`${applyRulesToUncategorized(book)} Buchungen zugeordnet.`)}>
+            <Wand2 size={16} />Auf {open.length} offene Buchungen anwenden
+          </button>
+        </>
       } />
       {info && <p className="text-sm text-success mb-3" role="status">{info}</p>}
       <form onSubmit={add} className="card p-3 mb-4 grid gap-2 md:grid-cols-[180px_150px_1fr_220px_auto] items-start">

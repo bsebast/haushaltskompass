@@ -31,7 +31,7 @@ Schnellerfassung im eigenen Fenster,buchungen,could,yes,partial,Taste N öffnet 
 Steuerkategorie je Kategorie mit Jahressummen,steuer,could,yes,partial,Steuerkategorie pflegbar; Jahressummen folgen
 Favoriten in der Navigation anpassen,oberfläche,could,yes,no,
 Statusleiste mit Meldungsverlauf,oberfläche,could,yes,no,
-CSV-Import von Bankumsätzen,import,could,no,no,eigene Ergänzung (Sparkasse ING DKB Volksbank)
+CSV-Import von Bankumsätzen,import,could,no,yes,"eigene Ergänzung: Volksbank getestet, Spalten anderer Banken über Aliasse; Regeln, Verträge, Dubletten, Saldoabgleich"
 Export als CSV,export,could,no,yes,eigene Ergänzung
 Steuervorschau mit Einkommensteuerberechnung,steuer,could,yes,skip,gepflegte Steuertabellen; nicht im Umfang
 Informationscenter mit Finanznachrichten,dashboard,could,yes,skip,redaktioneller Inhalt des Anbieters
