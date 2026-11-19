@@ -10,6 +10,7 @@ import Rules from './pages/Rules';
 import Budgets from './pages/Budgets';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import Contracts from './pages/Contracts';
 
 export default function App() {
   const { status, error } = useBookCtx();
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="buchungen" element={<Transactions />} />
         <Route path="kategorien" element={<Categories />} />
         <Route path="regeln" element={<Rules />} />
+        <Route path="vertraege" element={<Contracts />} />
         <Route path="budgets" element={<Budgets />} />
         <Route path="auswertungen" element={<Reports />} />
         <Route path="einstellungen" element={<Settings />} />

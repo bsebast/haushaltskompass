@@ -7,6 +7,7 @@ import { monthLeft, balanceTrend, budgetStatus, categoryTotals, monthlyTotals, s
 import { currentMonth, addMonths, monthRange, monthLabel, formatDate } from '../lib/dates';
 import { ACCOUNT_TYPES } from '../db/types';
 import { useTxDialog } from '../components/Layout';
+import { listContracts, perMonth, upcoming } from '../db/contracts';
 
 function Card({ title, link, children, className = '' }: { title: string; link?: [string, string]; children: React.ReactNode; className?: string }) {
   return (
@@ -32,10 +33,11 @@ export default function Dashboard() {
   const recent = useQuery((b) => listTransactions(b, { limit: 8 }));
   const hints = useQuery((b) => savingHints(b, m), [m]);
   const open = useQuery((b) => listTransactions(b, { uncategorized: true }).length);
+  const contracts = useQuery((b) => listContracts(b));
   const { openNew } = useTxDialog();
   const total = accounts.reduce((s, a) => s + a.balance, 0);
 
-  if (!recent.length) {
+  if (!recent.length && !contracts.length) {
     return (
       <div className="card">
         <Empty title="Willkommen in deinem Haushaltsbuch" text="Erfasse deine erste Ausgabe oder Einnahme. Danach füllt sich diese Übersicht von selbst."
@@ -123,6 +125,19 @@ export default function Dashboard() {
           </ul>
         )}
       </Card>
+
+
+      {contracts.length > 0 && (
+        <Card title="Fixkosten" link={['/vertraege', 'Alle Verträge']}>
+          <div className="text-2xl font-semibold"><Money cents={contracts.reduce((a, c) => a + perMonth(c), 0)} /> <span className="text-sm font-normal text-text-muted">Ø pro Monat</span></div>
+          <h3 className="text-xs text-text-muted mt-3 mb-1">Als Nächstes fällig</h3>
+          <ul className="space-y-1.5 text-sm">
+            {upcoming(contracts, 45).slice(0, 5).map(({ contract: c, date }) => (
+              <li key={c.id} className="flex gap-2"><span className="tabular-nums text-text-muted w-20">{formatDate(date)}</span><span className="flex-1 truncate">{c.name}</span><Money cents={c.amount} /></li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <Card title="Letzte Buchungen" link={['/buchungen', 'Alle Buchungen']} className="md:col-span-2 xl:col-span-3">
         <ul className="divide-y divide-border">

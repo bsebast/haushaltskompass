@@ -3,7 +3,31 @@ import schema from './schema.sql?raw';
 import { seedDefaults } from './seed';
 import { now } from '../lib/id';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
+
+/** Migrationen von Version n-1 auf n. Neue Bücher starten mit schema.sql (Version 1) und durchlaufen alle Migrationen. */
+const MIGRATIONS: Record<number, string> = {
+  2: `
+    alter table recurring add column name text;
+    alter table recurring add column person text;
+    alter table recurring add column purpose text;
+    alter table recurring add column kind text;
+    alter table recurring add column payment_method text;
+    alter table recurring add column due_day integer;
+    alter table recurring add column due_months text;
+    alter table recurring add column note text;
+    alter table recurring add column start_date text;
+    alter table recurring add column end_date text;
+    create index idx_recurring_status on recurring(status);
+  `,
+};
+
+function migrate(book: Book, from: number) {
+  for (let v = from + 1; v <= SCHEMA_VERSION; v++) {
+    book.db.exec(MIGRATIONS[v]);
+    book.db.run("insert into meta(key, value) values ('schema_version', ?) on conflict(key) do update set value = excluded.value", [String(v)]);
+  }
+}
 type Params = SqlValue[] | Record<string, SqlValue>;
 
 /** Ein geöffnetes Haushaltsbuch (eine SQLite-Datenbank). */
@@ -99,8 +123,9 @@ export function createBook(SQL: SqlJsStatic, name: string, owner?: string): Book
   const db = new SQL.Database();
   db.exec(schema);
   const book = new Book(db);
+  book.db.run("insert into meta(key, value) values ('schema_version', '1')");
+  migrate(book, 1);
   book.tx(() => {
-    book.setMeta('schema_version', String(SCHEMA_VERSION));
     book.setMeta('book_name', name);
     if (owner) book.setMeta('owner', owner);
     book.setMeta('created_at', now());
@@ -115,6 +140,6 @@ export function openBook(SQL: SqlJsStatic, data: Uint8Array): Book {
   const v = Number(book.meta('schema_version') ?? 0);
   if (!v) throw new Error('Die Datei ist kein Haushaltskompass-Haushaltsbuch.');
   if (v > SCHEMA_VERSION) throw new Error('Diese Datei stammt aus einer neueren Version des Programms.');
-  // künftige Migrationen hier: if (v < 2) { ... }
+  if (v < SCHEMA_VERSION) migrate(book, v);
   return book;
 }

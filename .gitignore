@@ -3,3 +3,8 @@ dist
 *.log
 .DS_Store
 test-results
+tsconfig.tsbuildinfo
+
+# private Daten nie einchecken
+privat/
+*.private.csv

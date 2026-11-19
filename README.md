@@ -23,6 +23,7 @@ npm run build      # statischer Build in dist/
 - Budgets je Kategorie (monatlich oder jährlich) mit Ampel und Prognose
 - Übersicht: Monatsrest mit Hochrechnung, Konten, Budgets, Saldenverlauf, Kategorien, Sparpotenzial
 - Auswertungen: Monat, Jahr, Monatsvergleich, Langzeit
+- Verträge & Fixkosten: Rhythmus, Fälligkeit, Person, Ø pro Monat, CSV-Import (Spalten wie Vertrag; Vertragspartner; Zweck; Betrag; Rhythmus; Fälligkeit; Zahlart; Art; Kategorie; Bemerkung)
 - Sicherung und Wiederherstellung als Datei, CSV-Export
 
 ## Aufbau

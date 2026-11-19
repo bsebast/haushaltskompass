@@ -12,7 +12,7 @@
 | S09 Regeln | 2026-11-19 | done | |
 | S10 Budgets | 2026-11-19 | done | |
 | S11 Auswertungen | 2026-11-19 | done | |
-| S12 Wiederkehrende Kosten | – | offen | |
+| S12 Verträge & Fixkosten | 2026-11-19 | partial | CSV-Import und Fälligkeiten fertig; Erkennung aus Buchungen folgt |
 | S13 Belege | – | offen | |
 | S14 CSV-Import | – | offen | |
 | S15 Einstellungen | 2026-11-19 | partial | Verschlüsselung folgt |
