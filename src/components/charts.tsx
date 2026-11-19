@@ -3,7 +3,8 @@ import { formatCents } from '../lib/money';
 import { monthLabel } from '../lib/dates';
 
 const css = (n: string) => `rgb(var(--c-${n}))`;
-const euro = (v: number) => formatCents(v);
+const euro = (v: unknown) => formatCents(Number(v ?? 0));
+const monthTip = (m: unknown) => monthLabel(String(m ?? ''), true);
 const short = (v: number) => `${Math.round(v / 100).toLocaleString('de-DE')} €`;
 
 export function IncomeExpenseChart({ data, height = 260 }: { data: { month: string; income: number; expense: number }[]; height?: number }) {
@@ -13,7 +14,7 @@ export function IncomeExpenseChart({ data, height = 260 }: { data: { month: stri
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="month" tickFormatter={(m) => monthLabel(m)} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={72} />
-        <Tooltip formatter={(v: number) => euro(v)} labelFormatter={(m: string) => monthLabel(m, true)} />
+        <Tooltip formatter={euro} labelFormatter={monthTip} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} />
         <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" fill={css('expense')} radius={[4, 4, 0, 0]} />
@@ -35,7 +36,7 @@ export function BalanceChart({ data, height = 220 }: { data: { month: string; ba
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="month" tickFormatter={(m) => monthLabel(m)} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
-        <Tooltip formatter={(v: number) => euro(v)} labelFormatter={(m: string) => monthLabel(m, true)} />
+        <Tooltip formatter={euro} labelFormatter={monthTip} />
         <Area isAnimationActive={false} type="monotone" dataKey="balance" name="Kontostand" stroke={css('accent')} strokeWidth={2} fill="url(#bal)" />
       </AreaChart>
     </ResponsiveContainer>
@@ -49,7 +50,7 @@ export function DonutChart({ data, height = 220 }: { data: { name: string; amoun
         <Pie isAnimationActive={false} data={data} dataKey="amount" nameKey="name" innerRadius="58%" outerRadius="90%" paddingAngle={1} stroke="none">
           {data.map((d, i) => <Cell key={i} fill={d.color} />)}
         </Pie>
-        <Tooltip formatter={(v: number) => euro(v)} />
+        <Tooltip formatter={euro} />
       </PieChart>
     </ResponsiveContainer>
   );
