@@ -8,6 +8,7 @@ import { uid, now } from '../lib/id';
 /**
  * Kontostand = letzter erfasster Kontostand (Snapshot) + Buchungen danach;
  * ohne Snapshot: Anfangssaldo + alle Buchungen.
+ * Automatisch ergänzte Gegenbuchungen am Tag des Snapshots zählen mit: Die Bank kannte sie beim Auszug noch nicht.
  */
 export function listAccounts(b: Book, includeArchived = false): Account[] {
   return b.all<Account>(
@@ -18,7 +19,8 @@ export function listAccounts(b: Book, includeArchived = false): Account[] {
        case when an.date is null
          then a.opening_balance + coalesce((select sum(amount) from transactions t where t.account_id = a.id), 0)
          else (select balance from balance_snapshots s where s.account_id = a.id and s.date = an.date)
-              + coalesce((select sum(amount) from transactions t where t.account_id = a.id and t.date > an.date), 0)
+              + coalesce((select sum(amount) from transactions t where t.account_id = a.id
+                  and (t.date > an.date or (t.date = an.date and t.auto_counterpart = 1))), 0)
        end as balance
      from accounts a left join anchor an on an.account_id = a.id
      ${includeArchived ? '' : 'where a.archived = 0'}

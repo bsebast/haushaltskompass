@@ -99,3 +99,15 @@ describe('Gegenbuchungen', () => {
     expect(tx(b, spar)).toHaveLength(0);
   });
 });
+
+describe('Kontostand mit automatisch ergänzter Gegenbuchung', () => {
+  it('zählt sie am Tag des Bankauszugs mit', async () => {
+    const b = await newBook();
+    const giro = saveAccount(b, { name: 'Giro', type: 'checking', iban: GIRO });
+    const karte = saveAccount(b, { name: 'Karte', type: 'credit' });
+    commitBankImport(b, parseBankCsv(csv(GIRO, [['19.11.2026', 'Max Muster', 'DE00999', 'Lohn', '1.000,00', '1.000,00']])), { accountId: giro });
+    const k = saveTransaction(b, { account_id: karte, date: '2026-11-19', amount: 60000, payee: 'Gutschrift', autoCategorize: false });
+    expect(linkCounterpart(b, k, giro)).toMatchObject({ created: true });
+    expect(bal(b, giro)).toBe(40000);
+  });
+});

@@ -95,14 +95,17 @@ export function balancesAt(b: Book, dates: string[], accountIds?: string[]): Map
   const accts = b.all<{ id: string; opening_balance: number }>('select id, opening_balance from accounts')
     .filter((a) => !accountIds || accountIds.includes(a.id));
   const snaps = b.all<{ account_id: string; date: string; balance: number }>('select account_id, date, balance from balance_snapshots order by date');
-  const tx = b.all<{ account_id: string; date: string; s: number }>('select account_id, date, sum(amount) as s from transactions group by account_id, date order by date');
+  const tx = b.all<{ account_id: string; date: string; s: number; auto: number }>(
+    'select account_id, date, sum(amount) as s, sum(case when auto_counterpart = 1 then amount else 0 end) as auto from transactions group by account_id, date order by date');
   const out = new Map<string, number[]>();
   for (const a of accts) {
     const sn = snaps.filter((x) => x.account_id === a.id);
     const tt = tx.filter((x) => x.account_id === a.id);
     out.set(a.id, dates.map((d) => {
       const anchor = [...sn].reverse().find((x) => x.date <= d);
-      if (anchor) return anchor.balance + tt.filter((x) => x.date > anchor.date && x.date <= d).reduce((s, x) => s + x.s, 0);
+      // automatisch ergänzte Gegenbuchungen am Tag des Snapshots kannte die Bank noch nicht
+      if (anchor) return anchor.balance + tt.filter((x) => x.date > anchor.date && x.date <= d).reduce((s, x) => s + x.s, 0)
+        + (tt.find((x) => x.date === anchor.date)?.auto ?? 0);
       // vor dem ersten erfassten Kontostand gibt es nur dann Werte, wenn es keine Snapshots gibt
       if (sn.length) return 0;
       return a.opening_balance + tt.filter((x) => x.date <= d).reduce((s, x) => s + x.s, 0);
