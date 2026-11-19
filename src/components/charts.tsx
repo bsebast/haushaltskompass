@@ -55,3 +55,65 @@ export function DonutChart({ data, height = 220 }: { data: { name: string; amoun
     </ResponsiveContainer>
   );
 }
+
+/** Feste Reihenfolge der Serienfarben (nie zyklisch; ab der 8. Serie wird zu „Weitere“ zusammengefasst). */
+export const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+
+const periodTick = (k: unknown) => {
+  const s = String(k ?? '');
+  if (/^\d{4}$/.test(s)) return s;
+  if (s.includes('-Q')) return `Q${s.slice(6)} ${s.slice(2, 4)}`;
+  return monthLabel(s);
+};
+
+export function CashflowChart({ data, height = 280 }: { data: { period: string; income: number; expense: number; saving: number }[]; height?: number }) {
+  const hasSaving = data.some((d) => d.saving);
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} barGap={2}>
+        <CartesianGrid vertical={false} stroke={css('border')} />
+        <XAxis dataKey="period" tickFormatter={periodTick} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
+        <Tooltip formatter={euro} labelFormatter={periodTick} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} />
+        <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" stackId="out" fill={css('expense')} radius={hasSaving ? undefined : [4, 4, 0, 0]} />
+        {hasSaving && <Bar isAnimationActive={false} dataKey="saving" name="Sparen" stackId="out" fill={SERIES[0]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} />}
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function FixVarChart({ data, height = 260 }: { data: { period: string; fixed: number; variable: number }[]; height?: number }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+        <CartesianGrid vertical={false} stroke={css('border')} />
+        <XAxis dataKey="period" tickFormatter={periodTick} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
+        <Tooltip formatter={euro} labelFormatter={periodTick} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Bar isAnimationActive={false} dataKey="fixed" name="Fixkosten (Verträge)" stackId="a" fill={SERIES[6]} stroke={css('surface')} strokeWidth={2} />
+        <Bar isAnimationActive={false} dataKey="variable" name="Variable Ausgaben" stackId="a" fill={SERIES[1]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function StackedAreaChart({ data, keys, height = 300 }: { data: Record<string, number | string>[]; keys: string[]; height?: number }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+        <CartesianGrid vertical={false} stroke={css('border')} />
+        <XAxis dataKey="period" tickFormatter={periodTick} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={88} />
+        <Tooltip formatter={euro} labelFormatter={periodTick} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        {keys.map((k, i) => (
+          <Area key={k} isAnimationActive={false} type="monotone" dataKey={k} name={k} stackId="w"
+            stroke={SERIES[i % SERIES.length]} strokeWidth={2} fill={SERIES[i % SERIES.length]} fillOpacity={0.35} />
+        ))}
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}

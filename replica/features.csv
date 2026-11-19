@@ -43,3 +43,12 @@ Kontostände zu Stichtagen und Vermögensverlauf,vermögen,should,no,yes,eigene 
 Depotpositionen,vermögen,could,no,yes,"manuell/Import, keine Kursabfrage"
 Vorsorge und Renten,vorsorge,could,no,yes,eigene Ergänzung
 Gesamtimport (JSON),import,could,no,yes,"Konten, Stände, Buchungen, Depots, Verträge, Vorsorge"
+Freie Zeiträume und Filter (Person/Konto/Kategorie/Suche),auswertungen,should,no,yes,eigene Ergänzung
+Kategorien × Zeit (Pivot je Monat/Quartal/Jahr),auswertungen,should,no,yes,"Idee aus YNAB/Firefly III, eigene Umsetzung"
+Cashflow mit Sparen und Sparquote,auswertungen,should,no,yes,eigene Ergänzung
+Fixkosten gegen variable Ausgaben und Vertrag geplant/gebucht,auswertungen,should,no,yes,eigene Ergänzung
+Vorjahresvergleich,auswertungen,could,no,yes,eigene Ergänzung
+Empfänger-Auswertung,auswertungen,could,no,yes,"Idee aus Firefly III (Ausgaben/Einnahmen je Gegenkonto)"
+Vermögensverlauf nach Kontoart/Person,auswertungen,could,no,yes,"Idee aus YNAB Net Worth/GnuCash"
+Kontoabgleich (Anfang/Ende/nicht erklärt),auswertungen,could,no,yes,"Idee aus Firefly III Audit-Report"
+Gespeicherte Ansichten und Export CSV/PDF,auswertungen,could,no,yes,eigene Ergänzung

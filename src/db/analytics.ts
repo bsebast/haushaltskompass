@@ -1,0 +1,354 @@
+import type { Book } from './core';
+import type { Category } from './types';
+import { listCategories, descendantIds, rootOf, listHoldings } from './repo';
+import { balancesAt } from './reports';
+import { listContracts, perMonth } from './contracts';
+import { addMonths, monthRange, today } from '../lib/dates';
+
+/** Flexible Auswertungen über alle Buchungszeilen (Splits aufgelöst, Umbuchungen ausgeschlossen). */
+
+export type Granularity = 'month' | 'quarter' | 'year';
+
+export interface ReportFilter {
+  from: string;
+  to: string;
+  accountIds?: string[];
+  owners?: string[];
+  categoryId?: string | null;
+  search?: string;
+  /** Kategorien unter „Sparen & Anlegen“ als Sparen statt als Ausgabe werten (Standard: ja) */
+  savingsAsSaving?: boolean;
+  /** Buchungen ohne Kategorie weglassen (z. B. nicht erkannte Überweisungen zwischen eigenen Konten) */
+  hideUncategorized?: boolean;
+}
+
+export interface Line {
+  date: string;
+  month: string;
+  account_id: string;
+  owner: string | null;
+  category_id: string | null;
+  root_id: string | null;
+  amount: number;
+  payee: string | null;
+  fixed: boolean;
+  kind: 'income' | 'expense' | 'saving';
+}
+
+const SAVING = /sparen|anlegen|geldanlage|vermögensaufbau/i;
+
+/** Kategorie-IDs, die als Sparen zählen (Name passt, inklusive Unterkategorien). */
+export function savingCategoryIds(cats: Category[]): Set<string> {
+  const out = new Set<string>();
+  for (const c of cats) if (c.kind === 'expense' && SAVING.test(c.name)) descendantIds(cats, c.id).forEach((id) => out.add(id));
+  return out;
+}
+
+export function reportLines(b: Book, f: ReportFilter): Line[] {
+  const where = ['t.transfer_id is null', 't.date between ? and ?'];
+  const p: (string | number)[] = [f.from, f.to];
+  if (f.accountIds?.length) { where.push(`t.account_id in (${f.accountIds.map(() => '?').join(',')})`); p.push(...f.accountIds); }
+  if (f.owners?.length) {
+    const named = f.owners.filter((o) => o !== '');
+    const parts = [];
+    if (named.length) { parts.push(`a.owner in (${named.map(() => '?').join(',')})`); p.push(...named); }
+    if (f.owners.includes('')) parts.push("coalesce(a.owner, '') = ''");
+    where.push(`(${parts.join(' or ')})`);
+  }
+  if (f.search?.trim()) {
+    for (const term of f.search.trim().toLowerCase().split(/\s+/)) {
+      where.push("(lower(coalesce(t.payee,'')) like ? or lower(coalesce(t.purpose,'')) like ? or lower(coalesce(t.note,'')) like ?)");
+      p.push(`%${term}%`, `%${term}%`, `%${term}%`);
+    }
+  }
+  const rows = b.all<{ date: string; account_id: string; owner: string | null; category_id: string | null; amount: number; payee: string | null; recurring_id: string | null }>(
+    `select t.date, t.account_id, a.owner, coalesce(s.category_id, t.category_id) as category_id, coalesce(s.amount, t.amount) as amount, t.payee, t.recurring_id
+     from transactions t join accounts a on a.id = t.account_id left join splits s on s.transaction_id = t.id
+     where ${where.join(' and ')} order by t.date`,
+    p,
+  );
+  const cats = listCategories(b);
+  const roots = rootOf(cats);
+  const saving = f.savingsAsSaving === false ? new Set<string>() : savingCategoryIds(cats);
+  const scope = f.categoryId ? new Set(descendantIds(cats, f.categoryId)) : null;
+  return rows
+    .filter((r) => !scope || (r.category_id && scope.has(r.category_id)))
+    .filter((r) => !f.hideUncategorized || r.category_id)
+    .map((r) => ({
+      date: r.date, month: r.date.slice(0, 7), account_id: r.account_id, owner: r.owner, category_id: r.category_id,
+      root_id: r.category_id ? roots.get(r.category_id) ?? r.category_id : null, amount: r.amount, payee: r.payee,
+      fixed: !!r.recurring_id,
+      kind: r.amount > 0 ? 'income' : r.category_id && saving.has(r.category_id) ? 'saving' : 'expense',
+    }));
+}
+
+/* ---------- Perioden ---------- */
+
+export function periodKey(month: string, g: Granularity): string {
+  if (g === 'year') return month.slice(0, 4);
+  if (g === 'quarter') return `${month.slice(0, 4)}-Q${Math.floor((Number(month.slice(5, 7)) - 1) / 3) + 1}`;
+  return month;
+}
+
+export function periodsBetween(from: string, to: string, g: Granularity): string[] {
+  const out: string[] = [];
+  for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = addMonths(m, 1)) {
+    const k = periodKey(m, g);
+    if (out[out.length - 1] !== k) out.push(k);
+  }
+  return out;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
+export function periodLabel(k: string): string {
+  if (/^\d{4}$/.test(k)) return k;
+  if (k.includes('-Q')) return `${k.slice(6)}. Q ${k.slice(2, 4)}`.replace('Q', 'Qu.');
+  return `${MONTHS[Number(k.slice(5, 7)) - 1]} ${k.slice(2, 4)}`;
+}
+
+/* ---------- Cashflow ---------- */
+
+export interface CashflowRow { period: string; income: number; expense: number; saving: number; net: number; fixed: number; variable: number; rate: number | null }
+
+export function cashflow(lines: Line[], periods: string[], g: Granularity): CashflowRow[] {
+  const map = new Map(periods.map((k) => [k, { period: k, income: 0, expense: 0, saving: 0, net: 0, fixed: 0, variable: 0, rate: null as number | null }]));
+  for (const l of lines) {
+    const r = map.get(periodKey(l.month, g));
+    if (!r) continue;
+    if (l.kind === 'income') r.income += l.amount;
+    else if (l.kind === 'saving') r.saving -= l.amount;
+    else {
+      r.expense -= l.amount;
+      if (l.fixed) r.fixed -= l.amount; else r.variable -= l.amount;
+    }
+  }
+  return [...map.values()].map((r) => ({ ...r, net: r.income - r.expense - r.saving, rate: r.income > 0 ? (r.income - r.expense) / r.income : null }));
+}
+
+export function sumCashflow(rows: CashflowRow[]): CashflowRow {
+  const s = rows.reduce((a, r) => ({ ...a, income: a.income + r.income, expense: a.expense + r.expense, saving: a.saving + r.saving, fixed: a.fixed + r.fixed, variable: a.variable + r.variable }),
+    { period: 'Summe', income: 0, expense: 0, saving: 0, net: 0, fixed: 0, variable: 0, rate: null as number | null });
+  return { ...s, net: s.income - s.expense - s.saving, rate: s.income > 0 ? (s.income - s.expense) / s.income : null };
+}
+
+/* ---------- Pivot Kategorie × Periode ---------- */
+
+export interface PivotRow {
+  id: string | null;
+  name: string;
+  color: string;
+  depth: number;
+  hasChildren: boolean;
+  cells: number[];
+  total: number;
+  avg: number;
+}
+
+/**
+ * Ausgaben (oder Einnahmen) je Kategorie und Periode. Oberkategorien sind Summen, aufgeklappte zeigen ihre Unterkategorien.
+ * Beträge positiv.
+ */
+export function pivot(b: Book, lines: Line[], periods: string[], g: Granularity, kind: 'expense' | 'income', expanded: Set<string>): PivotRow[] {
+  const cats = listCategories(b);
+  const byId = new Map(cats.map((c) => [c.id, c]));
+  const idx = new Map(periods.map((k, i) => [k, i]));
+  const leaf = new Map<string, number[]>(); // category_id (or '') → cells
+  for (const l of lines) {
+    if (kind === 'income' ? l.kind !== 'income' : l.kind === 'income') continue;
+    const i = idx.get(periodKey(l.month, g));
+    if (i === undefined) continue;
+    const key = l.category_id ?? '';
+    const arr = leaf.get(key) ?? periods.map(() => 0);
+    arr[i] += Math.abs(l.amount);
+    leaf.set(key, arr);
+  }
+  const subtotal = (id: string) => {
+    const ids = new Set(descendantIds(cats, id));
+    const cells = periods.map(() => 0);
+    for (const [k, arr] of leaf) if (ids.has(k)) arr.forEach((v, i) => { cells[i] += v; });
+    return cells;
+  };
+  const mk = (c: Category | null, depth: number, cells: number[]): PivotRow => {
+    const total = cells.reduce((a, v) => a + v, 0);
+    return {
+      id: c?.id ?? null, name: c?.name ?? 'Ohne Kategorie', color: c?.color ?? '#8a8478', depth,
+      hasChildren: !!c && cats.some((x) => x.parent_id === c.id), cells, total, avg: Math.round(total / Math.max(1, periods.length)),
+    };
+  };
+  const out: PivotRow[] = [];
+  const walk = (parent: string | null, depth: number) => {
+    const children = cats.filter((c) => c.parent_id === parent && c.kind === (kind === 'income' ? 'income' : 'expense'));
+    const rows = children.map((c) => mk(c, depth, depth === 0 || cats.some((x) => x.parent_id === c.id) ? subtotal(c.id) : leaf.get(c.id) ?? periods.map(() => 0)))
+      .filter((r) => r.total !== 0).sort((x, y) => y.total - x.total);
+    for (const r of rows) {
+      out.push(r);
+      if (r.id && expanded.has(r.id) && r.hasChildren) {
+        walk(r.id, depth + 1);
+        // Beträge direkt auf der Oberkategorie
+        const own = leaf.get(r.id);
+        if (own && own.some((v) => v)) out.push({ ...mk(byId.get(r.id)!, depth + 1, own), name: `${r.name} (direkt)`, hasChildren: false, id: `${r.id}#own` });
+      }
+    }
+  };
+  walk(null, 0);
+  // Buchungen auf Kategorien der anderen Art (z. B. Steuererstattung auf einer Ausgabenkategorie)
+  const want = kind === 'income' ? 'income' : 'expense';
+  const rest = periods.map(() => 0);
+  for (const [k, arr] of leaf) if (k && byId.get(k) && byId.get(k)!.kind !== want) arr.forEach((v, i) => { rest[i] += v; });
+  if (rest.some((v) => v)) out.push({ ...mk(null, 0, rest), name: kind === 'income' ? 'Erstattungen auf Ausgabenkategorien' : 'Abflüsse auf Einnahmenkategorien', id: '#other' });
+  const none = leaf.get('');
+  if (none && none.some((v) => v)) out.push(mk(null, 0, none));
+  return out;
+}
+
+/* ---------- Vergleich mit Vorjahr ---------- */
+
+export interface CompareRow { id: string | null; name: string; color: string; current: number; previous: number; diff: number; pct: number | null }
+
+export function shiftYear(date: string, years: number): string {
+  const y = Number(date.slice(0, 4)) + years;
+  const md = date.slice(5);
+  if (md === '02-29') return `${y}-02-28`;
+  return `${y}-${md}`;
+}
+
+export function compareByRoot(b: Book, cur: Line[], prev: Line[], kind: 'expense' | 'income'): CompareRow[] {
+  const cats = new Map(listCategories(b).map((c) => [c.id, c]));
+  const agg = (ls: Line[]) => {
+    const m = new Map<string | null, number>();
+    for (const l of ls) {
+      if (kind === 'income' ? l.kind !== 'income' : l.kind === 'income') continue;
+      m.set(l.root_id, (m.get(l.root_id) ?? 0) + Math.abs(l.amount));
+    }
+    return m;
+  };
+  const a = agg(cur);
+  const p = agg(prev);
+  return [...new Set([...a.keys(), ...p.keys()])].map((id) => {
+    const c = id ? cats.get(id) : undefined;
+    const current = a.get(id) ?? 0;
+    const previous = p.get(id) ?? 0;
+    return { id, name: c?.name ?? 'Ohne Kategorie', color: c?.color ?? '#8a8478', current, previous, diff: current - previous, pct: previous ? (current - previous) / previous : null };
+  }).sort((x, y) => Math.abs(y.diff) - Math.abs(x.diff));
+}
+
+/* ---------- Empfänger ---------- */
+
+export interface PayeeRow { payee: string; count: number; expense: number; income: number; last: string }
+
+export function topPayees(lines: Line[], limit = 50): PayeeRow[] {
+  const m = new Map<string, PayeeRow>();
+  for (const l of lines) {
+    const k = (l.payee ?? 'Unbekannt').trim();
+    const r = m.get(k) ?? { payee: k, count: 0, expense: 0, income: 0, last: l.date };
+    r.count++;
+    if (l.amount < 0) r.expense -= l.amount; else r.income += l.amount;
+    if (l.date > r.last) r.last = l.date;
+    m.set(k, r);
+  }
+  return [...m.values()].sort((x, y) => (y.expense + y.income) - (x.expense + x.income)).slice(0, limit);
+}
+
+/* ---------- Fixkosten: Plan gegen Ist ---------- */
+
+export interface ContractActual { id: string; name: string; planned: number; actual: number; count: number }
+
+/** Je Vertrag: geplante Kosten im Zeitraum (anteilig je Monat) und tatsächlich zugeordnete Buchungen. */
+export function contractsPlanVsActual(b: Book, f: ReportFilter): ContractActual[] {
+  // geplant nur bis heute, sonst zählen künftige Monate als „fehlende Buchung“
+  const until = f.to > today() ? today() : f.to;
+  const months = until < f.from ? 0 : periodsBetween(f.from, until, 'month').length;
+  const actual = b.all<{ recurring_id: string; s: number; n: number }>(
+    `select recurring_id, -sum(amount) as s, count(*) as n from transactions where recurring_id is not null and date between ? and ? group by recurring_id`, [f.from, f.to]);
+  const am = new Map(actual.map((r) => [r.recurring_id, r]));
+  return listContracts(b).filter((c) => c.amount < 0).map((c) => ({
+    id: c.id, name: c.person ? `${c.name} (${c.person})` : c.name, planned: Math.round(-perMonth(c) * months),
+    actual: am.get(c.id)?.s ?? 0, count: am.get(c.id)?.n ?? 0,
+  })).sort((x, y) => y.planned - x.planned);
+}
+
+/* ---------- Vermögen ---------- */
+
+export type WealthGroup = 'type' | 'owner' | 'account';
+
+export interface WealthSeries { keys: string[]; rows: Record<string, number | string>[]; depotValue: number; depotAsOf: string | null }
+
+/** Kontostände am Periodenende, gruppiert nach Kontoart, Person oder Konto. Depotwerte aus den Depotpositionen (letzter Stand). */
+export function wealthSeries(b: Book, fIn: ReportFilter, g: Granularity, group: WealthGroup, labels: { type: Record<string, string> }): WealthSeries {
+  const f = { ...fIn, to: fIn.to > today() ? today() : fIn.to };
+  const periods = periodsBetween(f.from, f.to, g);
+  const ends = periods.map((k) => {
+    if (g === 'year') return `${k}-12-31`;
+    if (g === 'quarter') { const q = Number(k.slice(6)); return monthRange(`${k.slice(0, 4)}-${String(q * 3).padStart(2, '0')}`).to; }
+    return monthRange(k).to;
+  }).map((d) => (d > f.to ? f.to : d));
+  let accts = b.all<{ id: string; name: string; type: string; owner: string | null }>('select id, name, type, owner from accounts');
+  if (f.accountIds?.length) accts = accts.filter((a) => f.accountIds!.includes(a.id));
+  if (f.owners?.length) accts = accts.filter((a) => f.owners!.includes(a.owner ?? ''));
+  const per = balancesAt(b, ends, accts.map((a) => a.id));
+  const keyOf = (a: (typeof accts)[number]) => (group === 'type' ? labels.type[a.type] ?? a.type : group === 'owner' ? a.owner || 'Ohne Inhaber' : a.name);
+  const keys = [...new Set(accts.map(keyOf))];
+  const rows = periods.map((k, i) => {
+    const r: Record<string, number | string> = { period: k };
+    for (const key of keys) r[key] = 0;
+    for (const a of accts) r[keyOf(a)] = (r[keyOf(a)] as number) + (per.get(a.id)?.[i] ?? 0);
+    r.total = keys.reduce((s, key) => s + (r[key] as number), 0);
+    return r;
+  });
+  const holdings = listHoldings(b).filter((h) => (!f.owners?.length || f.owners.includes(h.owner ?? '')));
+  const depotValue = holdings.reduce((s, h) => s + (h.market_value ?? 0), 0);
+  const depotAsOf = holdings.map((h) => h.as_of).filter(Boolean).sort().pop() ?? null;
+  return { keys: keys.filter((k) => rows.some((r) => r[k] !== 0)), rows, depotValue, depotAsOf };
+}
+
+/* ---------- Kontoabgleich ---------- */
+
+export interface AuditRow { id: string; name: string; owner: string | null; start: number; income: number; expense: number; transfers: number; end: number; gap: number }
+
+/**
+ * Je Konto: Stand vor dem Zeitraum, Zu- und Abflüsse, Stand am Ende. „Abweichung“ ist der Teil der Veränderung,
+ * der nicht durch Buchungen erklärt ist (z. B. erfasste Kontostände ohne passende Buchungen).
+ */
+export function accountAudit(b: Book, f: ReportFilter): AuditRow[] {
+  const d = new Date(`${f.from}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  const before = d.toISOString().slice(0, 10);
+  let accts = b.all<{ id: string; name: string; owner: string | null; archived: number }>('select id, name, owner, archived from accounts order by coalesce(owner, \'\'), sort_order, name');
+  if (f.accountIds?.length) accts = accts.filter((a) => f.accountIds!.includes(a.id));
+  if (f.owners?.length) accts = accts.filter((a) => f.owners!.includes(a.owner ?? ''));
+  const bal = balancesAt(b, [before, f.to], accts.map((a) => a.id));
+  const sums = b.all<{ account_id: string; inc: number; exp: number; tr: number }>(
+    `select account_id, sum(case when transfer_id is null and amount > 0 then amount else 0 end) as inc,
+            sum(case when transfer_id is null and amount < 0 then amount else 0 end) as exp,
+            sum(case when transfer_id is not null then amount else 0 end) as tr
+     from transactions where date between ? and ? group by account_id`, [f.from, f.to]);
+  const sm = new Map(sums.map((s) => [s.account_id, s]));
+  return accts.map((a) => {
+    const [start, end] = bal.get(a.id) ?? [0, 0];
+    const s = sm.get(a.id);
+    const income = s?.inc ?? 0;
+    const expense = -(s?.exp ?? 0);
+    const transfers = s?.tr ?? 0;
+    return { id: a.id, name: a.name, owner: a.owner, start, income, expense, transfers, end, gap: end - start - income + expense - transfers };
+  }).filter((r) => r.start || r.end || r.income || r.expense || r.transfers);
+}
+
+/* ---------- Gespeicherte Ansichten (im Haushaltsbuch, also auch in der Sicherung) ---------- */
+
+export interface SavedView { name: string; query: string }
+
+export function listViews(b: Book): SavedView[] {
+  try { return JSON.parse(b.meta('report_views') ?? '[]'); } catch { return []; }
+}
+
+export function saveView(b: Book, v: SavedView) {
+  const name = v.name.trim();
+  if (!name) throw new Error('Bitte einen Namen für die Ansicht eingeben.');
+  const views = listViews(b).filter((x) => x.name !== name);
+  views.push({ name, query: v.query });
+  b.setMeta('report_views', JSON.stringify(views));
+}
+
+export function deleteView(b: Book, name: string) {
+  b.setMeta('report_views', JSON.stringify(listViews(b).filter((x) => x.name !== name)));
+}

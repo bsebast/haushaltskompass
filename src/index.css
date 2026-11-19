@@ -19,3 +19,12 @@ body { @apply bg-bg text-text font-sans antialiased; }
   .amount-pos { @apply text-income tabular-nums; }
   .amount-neg { @apply text-expense tabular-nums; }
 }
+
+@media print {
+  aside, header, .no-print { display: none !important; }
+  main { padding: 0 !important; max-width: none !important; }
+  body { background: #fff; }
+  .card { box-shadow: none; break-inside: avoid; }
+  .print-only { display: block !important; }
+}
+.print-only { display: none; }

@@ -14,7 +14,8 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   );
 }
 
-export function Money({ cents, colored = true, className = '' }: { cents: number; colored?: boolean; className?: string }) {
+export function Money({ cents: raw, colored = true, className = '' }: { cents: number; colored?: boolean; className?: string }) {
+  const cents = raw || 0; // keine „-0,00 €“
   const cls = !colored ? 'tabular-nums' : cents < 0 ? 'amount-neg' : cents > 0 ? 'amount-pos' : 'tabular-nums';
   return <span className={`${cls} whitespace-nowrap ${className}`}>{formatCents(cents)}</span>;
 }
