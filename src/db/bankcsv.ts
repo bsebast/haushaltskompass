@@ -158,14 +158,16 @@ export function parseBankCsv(text: string): BankStatement {
   const limit = parseAmount(preVal(/^kreditrahmen/i) ?? '');
   const avail = parseAmount(preVal(/^verfügungsrahmen|^verfuegungsrahmen/i) ?? '');
   if (used === null && limit !== null && avail !== null) used = String((limit - avail) / 100).replace('.', ',');
-  const kind: 'checking' | 'credit' = /visa|mastercard|kreditkarte|american express/i.test(title) || used !== null ? 'credit' : 'checking';
+  // ein „Saldo“ im Kopf allein macht noch keine Kreditkarte (ING-Girokonten haben ihn auch)
+  const cardHint = preVal(/^(verbraucht|kreditrahmen)/i) !== null;
+  const kind: 'checking' | 'credit' = /visa|mastercard|kreditkarte|american express/i.test(title) || cardHint ? 'credit' : 'checking';
   const get = (row: Record<string, string>, key: string) => (c[key] ? row[c[key]!] ?? '' : '');
 
   const warnings: string[] = [];
   const parsed: Omit<BankRow, 'hash'>[] = [];
   let iban: string | null = preVal(/^iban$/i)?.replace(/\s/g, '') || null;
   let accountName: string | null = preVal(/^kontoname$/i) || null;
-  let bank: string | null = null;
+  let bank: string | null = preVal(/^bank$/i) || null;
   let pending = 0;
   const refs = new Map<number, string>();
   const refSeen = new Map<string, number>();
@@ -415,7 +417,7 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
   const taxCat = findCategoryByLabel(cats, 'Finanzen › Steuern')?.id ?? null;
   const bookedCategory = (r: BankRow): string | null => {
     const text = `${r.bookingText} ${r.purpose}`;
-    if (/^\s*(kapitalertrag(s)?steuer|solidaritätszuschlag|solidaritaetszuschlag|kirchensteuer)\b/i.test(r.bookingText) || /steuererstattung (kap|sol|kirch)/i.test(text)) return taxCat;
+    if (/^\s*(kapitalertrag(s)?steuer|solidaritätszuschlag|solidaritaetszuschlag|kirchensteuer|vorabpauschale)\b/i.test(r.bookingText) || /steuererstattung (kap|sol|kirch)/i.test(text)) return taxCat;
     if (r.amount > 0 && /^\s*(abschluss|zinsen|habenzins)/i.test(r.bookingText)) return interestCat;
     return null;
   };

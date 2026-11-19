@@ -225,4 +225,25 @@ describe('comdirect-Import', () => {
     const plan = planBankImport(b, parseBankCsv(csv), tg);
     expect(plan.rows.map((x) => x.categoryId)).toEqual([cat('Zinsen & Dividenden'), cat('Steuern'), cat('Steuern')]);
   });
+
+  it('liest den ING-Export: Kopf mit Saldo ist keine Kreditkarte, Wertpapierkauf geht ins Depot, Vorabpauschale zu Steuern', async () => {
+    // frei erfundene Daten im Aufbau des ING-Umsatzexports
+    const ing = [
+      'Umsatzanzeige;Datei erstellt am: 19.11.2026 15:41', '', 'IBAN;DE00 1234 5678 0000 0000 55', 'Kontoname;Extra-Konto', 'Bank;ING',
+      'Kunde;Max Muster', 'Zeitraum;01.01.2026 - 19.11.2026', 'Saldo;0,00;EUR', '', 'Sortierung;Datum absteigend', '',
+      'Buchung;Wertstellungsdatum;Auftraggeber/Empfänger;Buchungstext;Verwendungszweck;Referenz;Saldo;Währung;Betrag;Währung',
+      '02.03.2026;04.03.2026;;Wertpapierkauf;WP-ABRECHNUNG 1 Kauf ISIN IE00TEST0001;;0,00;EUR;-90,00;EUR',
+      '20.02.2026;20.02.2026;;Vorabpauschale;Zins/Dividende ISIN IE00TEST0001;;90,00;EUR;-10,00;EUR',
+      '15.02.2026;15.02.2026;Max Muster;Gutschrift;Sparplan;;100,00;EUR;100,00;EUR',
+    ].join('\r\n');
+    const st = parseBankCsv(ing);
+    expect([st.kind, st.bank, st.accountName, st.iban, st.endBalance, st.startBalance]).toEqual(['checking', 'ING', 'Extra-Konto', 'DE00123456780000000055', 0, 0]);
+    const b = await newBook();
+    const acc = saveAccount(b, { name: 'Extra-Konto', type: 'checking', bank: 'ING', owner: 'Max' });
+    saveAccount(b, { name: 'Depot', type: 'depot', bank: 'ING', owner: 'Max' });
+    const plan = planBankImport(b, st, acc);
+    const steuer = listCategories(b).find((c) => c.name === 'Steuern')!.id;
+    expect(plan.rows.map((r) => [r.date, r.categoryId === steuer, !!r.transfer])).toEqual([['2026-02-15', false, false], ['2026-02-20', true, false], ['2026-03-02', false, true]]);
+    expect(plan.depot).toBe(1);
+  });
 });
