@@ -31,6 +31,25 @@ export const SUGGESTED_RULES: [value: string, category: string, op?: 'regex'][] 
   ['ertraegnisgutschrift', 'Zinsen & Dividenden'], ['ertragsgutschrift', 'Zinsen & Dividenden'], ['kupon', 'Zinsen & Dividenden'],
   ['lohn-/gehalt', 'Gehalt & Lohn'], ['familienkasse', 'Kindergeld'],
   ['abschluss', 'Finanzen › Bankgebühren'], ['kartenentgelt', 'Finanzen › Bankgebühren'],
+  // häufige Händler auf Kreditkartenabrechnungen, auch auf Reisen
+  ['\\b(coop|willys|ica kvantum|carrefour|delhaize|7-eleven|spar)\\b', 'Lebensmittel › Supermarkt', 'regex'],
+  ['\\b(pizzeria|pizza|kebab|burger|grill|cantina|trattoria|taverna|bistro|rooftop|pasta|taco)\\b', 'Freizeit › Restaurant & Café', 'regex'],
+  ['\\b(caf[eé]|coffee|konditorei|p[aâ]tisserie)(?![a-z])', 'Freizeit › Restaurant & Café', 'regex'], ['restaura', 'Freizeit › Restaurant & Café'],
+  ['lieferando', 'Freizeit › Restaurant & Café'], ['burger king', 'Freizeit › Restaurant & Café'],
+  ['\\b(hotel|resort|hostel|booking\\.com|expedia|trip\\.com|stayforlong|airbnb)\\b', 'Freizeit › Urlaub', 'regex'],
+  ['\\b(lufthansa|finnair|eurowings|ryanair|easyjet|condor|sas)\\b', 'Freizeit › Urlaub', 'regex'],
+  ['\\b(sixt|europcar|hertz|avis)\\b', 'Freizeit › Urlaub', 'regex'],
+  ['\\b(park(en|haus|ing|platz|pl)?|easypark|avantpark|epark\\w*|\\w*parkering\\w*)\\b', 'Mobilität › Parken', 'regex'],
+  ['\\b(ladevorgang|charge session|charging|charge it easy|vaylens|ionity|circle k|st1)\\b', 'Mobilität › Kraftstoff', 'regex'],
+  ['\\b(stib|vasttrafik|flygbussarna|f[aä]hre|bvg|mvv|vvs|hvv)\\b', 'Mobilität › ÖPNV & Bahn', 'regex'],
+  ['\\b(ticketmaster|eventbrite|eventim|cinemaxx|kinoheld|museum|tickets)\\b', 'Freizeit › Kultur & Events', 'regex'],
+  ['\\b(therme|thermen|badewelt|schwimmbad)\\b', 'Freizeit › Sport', 'regex'],
+  ['\\b(intersport|decathlon|asics)\\b', 'Einkäufe › Kleidung', 'regex'], ['\\bm(ü|ue)ller\\b', 'Einkäufe › Drogerie', 'regex'],
+  ['\\b(aliexpress|ebay|limango|temu)\\b', 'Einkäufe', 'regex'], ['\\b(expert|mediamarkt|saturn)\\b', 'Einkäufe › Elektronik', 'regex'],
+  ['\\b(baumarkt|obi|hornbach|bauhaus)\\b', 'Wohnen › Reparaturen', 'regex'], ['\\b(m[oö]bel|ikea)\\b', 'Wohnen › Einrichtung', 'regex'],
+  ['\\b(osiander|thalia|hugendubel)\\b', 'Freizeit › Hobbys', 'regex'],
+  ['\\b(e\\.on|fairenergie)\\b', 'Wohnen › Strom', 'regex'],
+  ['stellantis', 'Mobilität'],
 ];
 
 /** Vorschlagsregeln als (noch nicht gespeicherte) Regeln, nur für Werte, die es noch nicht gibt. */

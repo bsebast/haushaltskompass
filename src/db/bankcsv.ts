@@ -61,8 +61,8 @@ const ALIASES: Record<string, string[]> = {
   amount: ['betrag', 'betrag (eur)', 'betrag (€)', 'umsatz', 'umsatz in eur'],
   payee: ['beschreibung', 'name zahlungsbeteiligter', 'beguenstigter/zahlungspflichtiger', 'begünstigter/zahlungspflichtiger', 'zahlungsempfänger*in',
     'zahlungspflichtige*r', 'auftraggeber/empfänger', 'auftraggeber / begünstigter', 'empfänger', 'name'],
-  purpose: ['verwendungszweck', 'buchungsdetails', 'vorgang/verwendungszweck'],
-  bookingText: ['buchungstext', 'umsatzart', 'umsatztyp', 'vorgang'],
+  purpose: ['verwendungszweck', 'buchungsdetails', 'vorgang/verwendungszweck', 'details'],
+  bookingText: ['buchungstext', 'umsatzart', 'umsatztyp', 'vorgang', 'typ'],
   balance: ['saldo nach buchung', 'saldo'],
   iban: ['iban auftragskonto', 'auftragskonto'],
   accountName: ['bezeichnung auftragskonto'],
@@ -72,6 +72,8 @@ const ALIASES: Record<string, string[]> = {
   time: ['zeit', 'uhrzeit'],
   card: ['karte', 'kartennummer'],
   currency: ['waehrung', 'währung'],
+  ref: ['referenznummer', 'referenz'],
+  holder: ['karteninhaber'],
 };
 
 const clean = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
@@ -149,16 +151,20 @@ export function parseBankCsv(text: string): BankStatement {
   const pre = lines.slice(0, h).map((l) => l.split(/;/).map((x) => x.replace(/^"|"$/g, '').trim()));
   const preVal = (re: RegExp) => pre.find((r) => re.test(r[0] ?? ''))?.[1] ?? null;
   const title = pre.map((r) => r.join(' ')).join(' ');
-  const holder = preVal(/^(karteninhaber|kontoinhaber)/i);
+  let holder = preVal(/^(karteninhaber|kontoinhaber)/i);
   const refIban = preVal(/^referenzkonto/i)?.replace(/\s/g, '') || null;
-  const used = preVal(/^(verbraucht|aktueller saldo|saldo)/i);
+  let used = preVal(/^(verbraucht|aktueller saldo|saldo)/i);
+  // easybank & Co.: Kreditrahmen minus Verfügungsrahmen ist der offene Betrag
+  const limit = parseAmount(preVal(/^kreditrahmen/i) ?? '');
+  const avail = parseAmount(preVal(/^verfügungsrahmen|^verfuegungsrahmen/i) ?? '');
+  if (used === null && limit !== null && avail !== null) used = String((limit - avail) / 100).replace('.', ',');
   const kind: 'checking' | 'credit' = /visa|mastercard|kreditkarte|american express/i.test(title) || used !== null ? 'credit' : 'checking';
   const get = (row: Record<string, string>, key: string) => (c[key] ? row[c[key]!] ?? '' : '');
 
   const warnings: string[] = [];
   const parsed: Omit<BankRow, 'hash'>[] = [];
-  let iban: string | null = null;
-  let accountName: string | null = null;
+  let iban: string | null = preVal(/^iban$/i)?.replace(/\s/g, '') || null;
+  let accountName: string | null = preVal(/^kontoname$/i) || null;
   let bank: string | null = null;
   let pending = 0;
   const refs = new Map<number, string>();
@@ -189,7 +195,10 @@ export function parseBankCsv(text: string): BankStatement {
     }
     // Kreditkarte: Karte und Uhrzeit machen die Buchung eindeutig
     const time = clean(get(row, 'time'));
-    if (!comdirect && time) {
+    holder ??= clean(get(row, 'holder')) || null;
+    const bankRef = clean(get(row, 'ref'));
+    if (!comdirect && bankRef) refs.set(parsed.length, bankRef);
+    else if (!comdirect && time) {
       const key = `${clean(get(row, 'card'))}|${date}|${time}|${amount}`;
       const n = (refSeen.get(key) ?? 0) + 1;
       refSeen.set(key, n);
@@ -214,7 +223,7 @@ export function parseBankCsv(text: string): BankStatement {
   if (kind === 'credit') {
     const name = /(amazon visa|[\wäöü]+ (?:visa|mastercard)|kreditkarte)/i.exec(title)?.[1] ?? 'Kreditkarte';
     accountName ??= name.replace(/\b\w/g, (x) => x.toUpperCase()).replace('Amazon Visa', 'Amazon Visa');
-    bank ??= accountName;
+    bank ??= accountName.replace(/\s*kreditkarte$/i, '') || accountName;
   }
 
   // Reihenfolge erkennen: Banken liefern meist die neueste Buchung zuerst
@@ -435,7 +444,9 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
     const text = `${t.payee ?? ''} ${t.purpose ?? ''}`;
     if (INTERNAL.test(text)) return true;
     if (st.kind === 'credit' && CARD.test(text)) return true;
-    const w = words(`${r.payee} ${st.holder ?? ''}`);
+    // Kartenbank zieht den Saldo per Lastschrift ein (auch unter altem Banknamen)
+    if (st.kind === 'credit' && /lastschrift/i.test(`${r.payee} ${r.purpose}`) && /lastschrift/i.test(text)) return true;
+    const w = words(`${r.payee} ${st.holder ?? ''} ${st.kind === 'credit' ? `${st.accountName ?? ''} ${st.bank ?? ''}` : ''}`);
     return [...words(t.payee)].some((x) => w.has(x));
   };
   const dayDiff = (a: string, z: string) => Math.abs(Date.parse(a) - Date.parse(z)) / 86400000;
@@ -454,7 +465,9 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
       const own = r.counterIban ? byIban.get(r.counterIban.toUpperCase()) : undefined;
       if (r.securities && depot) {
         transfer = { accountId: depot.id, accountName: depot.name, txId: null, date: r.date };
-      } else if (own || INTERNAL.test(`${r.bookingText} ${r.purpose}${st.kind === 'credit' ? ` ${r.payee}` : ''}`)) {
+      } else if (own || INTERNAL.test(`${r.bookingText} ${r.purpose}${st.kind === 'credit' ? ` ${r.payee}` : ''}`)
+        // Kreditkarte: jede Gutschrift kann ein Ausgleich vom Girokonto sein; die Gegenbuchung muss trotzdem plausibel sein
+        || (st.kind === 'credit' && r.amount > 0)) {
         const m = counter
           .filter((t) => !usedCounter.has(t.id) && t.amount === -r.amount && dayDiff(t.date, r.date) <= 4 && (!own || t.account_id === own.id) && plausible(t, r))
           .sort((x, y) => dayDiff(x.date, r.date) - dayDiff(y.date, r.date)
@@ -519,7 +532,17 @@ export function commitBankImport(b: Book, st: BankStatement, opts: BankCommitOpt
   return b.tx(() => {
     let accountId = opts.accountId;
     if (!accountId) {
-      const refOwner = st.refIban ? listAccounts(b, true).find((a) => a.iban?.replace(/\s/g, '').toUpperCase() === st.refIban!.toUpperCase())?.owner ?? null : null;
+      const all = listAccounts(b, true);
+      let refOwner = st.refIban ? all.find((a) => a.iban?.replace(/\s/g, '').toUpperCase() === st.refIban!.toUpperCase())?.owner ?? null : null;
+      if (!refOwner && st.kind === 'credit') {
+        // ohne Referenzkonto: Inhaber des Kontos, von dem die Karte meist ausgeglichen wird
+        const n = new Map<string, number>();
+        for (const r of planBankImport(b, st, null).rows) {
+          const o = r.transfer ? all.find((a) => a.id === r.transfer!.accountId)?.owner : null;
+          if (o) n.set(o, (n.get(o) ?? 0) + 1);
+        }
+        refOwner = [...n].sort((x, y) => y[1] - x[1])[0]?.[0] ?? null;
+      }
       accountId = saveAccount(b, {
         name: opts.newAccount?.name || st.accountName || (st.kind === 'credit' ? 'Kreditkarte' : 'Girokonto'), type: st.kind === 'credit' ? 'credit' : 'checking',
         owner: opts.newAccount?.owner ?? refOwner, bank: st.bank, iban: st.iban,
