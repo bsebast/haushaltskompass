@@ -8,3 +8,4 @@ tsconfig.tsbuildinfo
 # private Daten nie einchecken
 privat/
 *.private.csv
+debug.png
