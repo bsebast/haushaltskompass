@@ -12,3 +12,4 @@ debug.png
 
 # Haushaltsbuch-Sicherungen und private Daten nie ins Repo
 *.hkb
+tests/zz_*
