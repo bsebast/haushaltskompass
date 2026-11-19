@@ -168,4 +168,44 @@ describe('comdirect-Import', () => {
     expect(again.newCount).toBe(0);
     expect(again.duplicates).toBe(6);
   });
+
+  it('liest den Kreditkarten-Export und verknüpft Abrechnung und Einzahlung mit dem Referenzkonto', async () => {
+    // frei erfundene Daten im Aufbau eines Kartenexports (Vorspann, dann Umsätze mit Uhrzeit und Unterkategorie)
+    const card = [
+      '"Muster Visa - Umsätze "', '',
+      '"Karteninhaber: ";"Max Muster"', '"Referenzkonto:";"DE00123456780000000009"', '"Verbraucht:";"40,00 €"', '',
+      '"Datum";"Zeit";"Karte";"Beschreibung";"Umsatzkategorie";"Unterkategorie";"Betrag";"Punkte"',
+      '"20.03.2026 ";"10:00 Uhr";"****1111";"EDEKA MUSTER";"Lebensmittel";"Lebensmittel und Supermärkte";"-40,00 €";"0"',
+      '"15.03.2026 ";"09:00 Uhr";"****1111";"EINZAHLUNG AUF KARTE **1111";"Einkommen";"Sonstiges (Einkommen)";"25,00 €";"0"',
+      '"12.03.2026 ";"12:00 Uhr";"****1111";"Hotel am See";"Reisen";"Hotels und Unterkünfte";"-25,00 €";"0"',
+      '"28.02.2026 ";"08:00 Uhr";"****1111";"Kartenabrechnung";"Einkommen";"Sonstiges (Einkommen)";"80,00 €";"0"',
+      '"20.02.2026 ";"18:00 Uhr";"****1111";"EDEKA MUSTER";"Lebensmittel";"Lebensmittel und Supermärkte";"-80,00 €";"0"',
+    ].join('\r\n');
+    const st = parseBankCsv(card);
+    expect(st.kind).toBe('credit');
+    expect(st.accountName).toBe('Muster Visa');
+    expect(st.refIban).toBe('DE00123456780000000009');
+    expect(st.rows).toHaveLength(5);
+    expect(st.endBalance).toBe(-4000);
+    expect(st.startBalance).toBe(0);
+
+    const b = await newBook();
+    const giro = saveAccount(b, { name: 'Girokonto', type: 'checking', owner: 'Max', iban: 'DE00123456780000000009' });
+    saveTransaction(b, { account_id: giro, date: '2026-02-28', amount: -8000, payee: 'Abrechnung Muster Visa-Kreditkarte', autoCategorize: false });
+    saveTransaction(b, { account_id: giro, date: '2026-03-15', amount: -2500, payee: 'Max Muster', purpose: 'Umbuchung Kreditkarte', autoCategorize: false });
+    saveTransaction(b, { account_id: giro, date: '2026-03-20', amount: -4000, payee: 'Barauszahlung', autoCategorize: false });
+    expect(suggestAccount(b, st)).toBeNull();
+    const plan = planBankImport(b, st, null);
+    expect(plan.rows.filter((r) => r.transfer).map((r) => r.date)).toEqual(['2026-02-28', '2026-03-15']);
+    const cats = new Map(listCategories(b).map((c) => [c.id, c.name]));
+    expect(plan.rows.map((r) => (r.categoryId ? cats.get(r.categoryId) : null))).toEqual(['Supermarkt', null, 'Urlaub', null, 'Supermarkt']);
+
+    const res = commitBankImport(b, st, { accountId: null });
+    expect(res).toMatchObject({ imported: 5, transfers: 2, balance: -4000 });
+    const acc = listAccounts(b).find((a) => a.id === res.accountId)!;
+    expect([acc.type, acc.owner]).toEqual(['credit', 'Max']);
+    expect(listTransactions(b, { accountId: giro }).filter((t) => t.transfer_id)).toHaveLength(2);
+    expect(suggestAccount(b, st)).toBe(res.accountId);
+    expect(commitBankImport(b, st, { accountId: res.accountId }).imported).toBe(0);
+  });
 });

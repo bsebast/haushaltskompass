@@ -6,6 +6,7 @@ import { parseBankCsv, planBankImport, commitBankImport, suggestAccount, type Ba
 import { pendingSuggestedRules } from '../db/ruleSuggestions';
 import { formatDate } from '../lib/dates';
 import { formatCents } from '../lib/money';
+import { isXls, xlsToCsv } from '../lib/xls';
 
 const NEW = '__new__';
 
@@ -31,8 +32,12 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
     setSt(null);
     try {
       const buf = await f.arrayBuffer();
-      let text = new TextDecoder('utf-8').decode(buf);
-      if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
+      let text: string;
+      if (isXls(buf)) text = xlsToCsv(buf);
+      else {
+        text = new TextDecoder('utf-8').decode(buf);
+        if (text.includes('�')) text = new TextDecoder('windows-1252').decode(buf);
+      }
       const s = parseBankCsv(text);
       setAccount(suggestAccount(book, s) ?? NEW);
       setSt(s);
@@ -68,8 +73,8 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <div className="space-y-3 text-sm">
-          <p className="text-text-muted">CSV-Export der Umsätze aus dem Online-Banking, z. B. bei Volksbanken unter Umsätze → Export → CSV, bei der comdirect unter Umsätze → Export als CSV. Bereits importierte Buchungen werden erkannt und nicht doppelt übernommen.</p>
-          <Field label="Datei"><input type="file" accept=".csv,text/csv" className="input py-1" onChange={(e) => read(e.target.files?.[0])} /></Field>
+          <p className="text-text-muted">CSV-Export der Umsätze aus dem Online-Banking, z. B. bei Volksbanken unter Umsätze → Export → CSV, bei der comdirect unter Umsätze → Export als CSV. Kreditkarten-Umsätze können auch als Excel-Datei (.xls) eingelesen werden. Bereits importierte Buchungen werden erkannt und nicht doppelt übernommen.</p>
+          <Field label="Datei"><input type="file" accept=".csv,.xls,text/csv,application/vnd.ms-excel" className="input py-1" onChange={(e) => read(e.target.files?.[0])} /></Field>
           {st && plan && (
             <>
               <div className="rounded-md bg-surface-2 p-3 grid sm:grid-cols-2 gap-x-4 gap-y-1">

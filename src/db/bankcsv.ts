@@ -1,9 +1,9 @@
 import Papa from 'papaparse';
 import type { Book } from './core';
 import type { Rule } from './types';
-import { listAccounts, listRules, listSnapshots, saveAccount, saveRule, saveSnapshot, saveTransaction } from './repo';
+import { listAccounts, listCategories, listRules, listSnapshots, saveAccount, saveRule, saveSnapshot, saveTransaction } from './repo';
 import { findCategory } from './rules';
-import { listContracts, type Contract } from './contracts';
+import { listContracts, findCategoryByLabel, type Contract } from './contracts';
 import { parseAmount } from '../lib/money';
 import { uid } from '../lib/id';
 
@@ -26,6 +26,8 @@ export interface BankRow {
   counterIban: string | null;
   /** Wertpapierkauf oder -verkauf (gehört zum Depot) */
   securities: boolean;
+  /** Kategorie, die die Bank selbst vergibt (z. B. bei Kreditkarten) */
+  bankCategory: string | null;
   /** Saldo nach der Buchung in Cent, falls die Bank ihn mitliefert */
   balance: number | null;
   hash: string;
@@ -45,13 +47,19 @@ export interface BankStatement {
   /** Saldo am Ende jedes Buchungstags */
   dayEnd: Map<string, number>;
   warnings: string[];
+  /** 'credit' bei Kreditkartenabrechnungen */
+  kind: 'checking' | 'credit';
+  /** Karteninhaber bzw. Kontoinhaber laut Datei */
+  holder: string | null;
+  /** Referenzkonto, von dem die Kartenabrechnung eingezogen wird */
+  refIban: string | null;
 }
 
 const ALIASES: Record<string, string[]> = {
   date: ['buchungstag', 'buchungsdatum', 'buchung', 'datum'],
   valuta: ['valutadatum', 'valuta', 'wertstellung'],
   amount: ['betrag', 'betrag (eur)', 'betrag (€)', 'umsatz', 'umsatz in eur'],
-  payee: ['name zahlungsbeteiligter', 'beguenstigter/zahlungspflichtiger', 'begünstigter/zahlungspflichtiger', 'zahlungsempfänger*in',
+  payee: ['beschreibung', 'name zahlungsbeteiligter', 'beguenstigter/zahlungspflichtiger', 'begünstigter/zahlungspflichtiger', 'zahlungsempfänger*in',
     'zahlungspflichtige*r', 'auftraggeber/empfänger', 'auftraggeber / begünstigter', 'empfänger', 'name'],
   purpose: ['verwendungszweck', 'buchungsdetails', 'vorgang/verwendungszweck'],
   bookingText: ['buchungstext', 'umsatzart', 'umsatztyp', 'vorgang'],
@@ -60,6 +68,9 @@ const ALIASES: Record<string, string[]> = {
   accountName: ['bezeichnung auftragskonto'],
   bank: ['bankname auftragskonto'],
   counterIban: ['iban zahlungsbeteiligter', 'iban', 'kontonummer/iban'],
+  bankCategory: ['unterkategorie', 'umsatzkategorie'],
+  time: ['zeit', 'uhrzeit'],
+  card: ['karte', 'kartennummer'],
   currency: ['waehrung', 'währung'],
 };
 
@@ -134,6 +145,14 @@ export function parseBankCsv(text: string): BankStatement {
     return m ? parseAmount(m[1]) : null;
   };
   if (comdirect) { c.bookingText = 'vorgang'; c.purpose = 'buchungstext'; }
+  // Kopfangaben wie „Karteninhaber: X“, „Referenzkonto: DE…“, „Verbraucht: 1.018,78 €“ (Kreditkartenexporte)
+  const pre = lines.slice(0, h).map((l) => l.split(/;/).map((x) => x.replace(/^"|"$/g, '').trim()));
+  const preVal = (re: RegExp) => pre.find((r) => re.test(r[0] ?? ''))?.[1] ?? null;
+  const title = pre.map((r) => r.join(' ')).join(' ');
+  const holder = preVal(/^(karteninhaber|kontoinhaber)/i);
+  const refIban = preVal(/^referenzkonto/i)?.replace(/\s/g, '') || null;
+  const used = preVal(/^(verbraucht|aktueller saldo|saldo)/i);
+  const kind: 'checking' | 'credit' = /visa|mastercard|kreditkarte|american express/i.test(title) || used !== null ? 'credit' : 'checking';
   const get = (row: Record<string, string>, key: string) => (c[key] ? row[c[key]!] ?? '' : '');
 
   const warnings: string[] = [];
@@ -143,6 +162,7 @@ export function parseBankCsv(text: string): BankStatement {
   let bank: string | null = null;
   let pending = 0;
   const refs = new Map<number, string>();
+  const refSeen = new Map<string, number>();
   res.data.forEach((row, i) => {
     const date = toIsoDate(get(row, 'date'));
     const amount = parseAmount(get(row, 'amount'));
@@ -167,10 +187,20 @@ export function parseBankCsv(text: string): BankStatement {
       purpose = x.purpose; rawPayee = x.payee; counterIban = x.counterIban;
       if (x.ref) refs.set(parsed.length, x.ref);
     }
+    // Kreditkarte: Karte und Uhrzeit machen die Buchung eindeutig
+    const time = clean(get(row, 'time'));
+    if (!comdirect && time) {
+      const key = `${clean(get(row, 'card'))}|${date}|${time}|${amount}`;
+      const n = (refSeen.get(key) ?? 0) + 1;
+      refSeen.set(key, n);
+      refs.set(parsed.length, `${key}#${n}`);
+    }
+    if (kind === 'credit' && refIban && /kartenabrechnung|lastschrift/i.test(rawPayee || purpose)) counterIban ??= refIban;
     const bal = parseAmount(get(row, 'balance'));
     parsed.push({
       line: h + i + 2, date, amount, purpose, bookingText, rawPayee, counterIban,
       securities: /^wertpapier/i.test(bookingText),
+      bankCategory: clean(get(row, 'bankCategory')) || null,
       payee: (realPayee(rawPayee, purpose) || bank || bookingText || 'Unbekannt').split(/\s+(?:WPKNR:|ISIN:|DEPOTBESTAND:)/)[0],
       balance: bal,
     });
@@ -180,6 +210,11 @@ export function parseBankCsv(text: string): BankStatement {
   if (comdirect) {
     bank ??= 'comdirect';
     accountName ??= /Umsätze ([^";]+)/.exec(lines.slice(0, h).join(' '))?.[1]?.trim() ?? null;
+  }
+  if (kind === 'credit') {
+    const name = /(amazon visa|[\wäöü]+ (?:visa|mastercard)|kreditkarte)/i.exec(title)?.[1] ?? 'Kreditkarte';
+    accountName ??= name.replace(/\b\w/g, (x) => x.toUpperCase()).replace('Amazon Visa', 'Amazon Visa');
+    bank ??= accountName;
   }
 
   // Reihenfolge erkennen: Banken liefern meist die neueste Buchung zuerst
@@ -222,16 +257,22 @@ export function parseBankCsv(text: string): BankStatement {
     const sum = rows.reduce((a, r) => a + r.amount, 0);
     startBalance = oldB ?? (newB !== null ? newB - sum : null);
     endBalance = newB ?? (oldB !== null ? oldB + sum : null);
+    if (oldB === null && newB === null && used !== null && kind === 'credit') {
+      // „Verbraucht“ ist der offene Betrag der Karte, also ein negativer Kontostand
+      const owed = parseAmount(used);
+      if (owed !== null) { endBalance = -Math.abs(owed); startBalance = endBalance - sum; }
+    }
     if (oldB !== null && newB !== null && oldB + sum !== newB) {
       warnings.push(`Alter Kontostand plus Buchungen ergibt ${(oldB + sum) / 100} €, die Bank meldet ${newB / 100} €. Fehlen Buchungen in der Datei?`);
-    } else if (startBalance !== null) {
+    }
+    if (startBalance !== null && !(oldB !== null && newB !== null && oldB + sum !== newB)) {
       let run = startBalance;
       for (const r of rows) { run += r.amount; dayEnd.set(r.date, run); }
     }
   }
   return {
     accountName, iban, bank, rows, warnings, dayEnd,
-    from: first.date, to: last.date, endBalance, startBalance,
+    from: first.date, to: last.date, endBalance, startBalance, kind, holder, refIban,
   };
 }
 
@@ -263,7 +304,8 @@ export function suggestAccount(b: Book, st: BankStatement): string | null {
   }
   if (st.bank) {
     const word = st.bank.split(/\s/)[0].toLowerCase();
-    const cands = accts.filter((a) => !a.archived && a.type === 'checking' && (a.bank ?? '').toLowerCase().includes(word));
+    const type = st.kind === 'credit' ? 'credit' : 'checking';
+    const cands = accts.filter((a) => !a.archived && a.type === type && `${a.bank ?? ''} ${a.name}`.toLowerCase().includes(word));
     if (cands.length === 1) return cands[0].id;
   }
   return null;
@@ -299,6 +341,36 @@ export interface BankPlan {
   snapshotFixes: { date: string; old: number; bank: number }[];
 }
 
+/** Kategorien, die Kartenanbieter selbst vergeben, übersetzt in die eigenen Standardkategorien. */
+const BANK_CATEGORIES: Record<string, string> = {
+  'Lebensmittel und Supermärkte': 'Lebensmittel › Supermarkt',
+  'Restaurants, Cafés und Bars': 'Freizeit › Restaurant & Café',
+  'Fast Food': 'Freizeit › Restaurant & Café',
+  'Tankstellen': 'Mobilität › Kraftstoff',
+  'Öffentliche Verkehrsmittel, Taxis, Autobahnen und Parkplätze': 'Mobilität › ÖPNV & Bahn',
+  'Parken': 'Mobilität › Parken',
+  'Apotheken': 'Gesundheit › Apotheke',
+  'Ärzte': 'Gesundheit › Arzt',
+  'Bekleidung': 'Einkäufe › Kleidung',
+  'Kleidung und Schuhe': 'Einkäufe › Kleidung',
+  'Elektronik': 'Einkäufe › Elektronik',
+  'Sonstige (Handel und Geschäfte)': 'Einkäufe',
+  'Freizeitaktivitäten': 'Freizeit › Hobbys',
+  'Reisen': 'Freizeit › Urlaub',
+  'Hotels': 'Freizeit › Urlaub',
+  'Kultur': 'Freizeit › Kultur & Events',
+  'Sport': 'Freizeit › Sport',
+  'Shows und Museen': 'Freizeit › Kultur & Events',
+  'Hotels und Unterkünfte': 'Freizeit › Urlaub',
+  'Kleidung, Schuhe, Accessoires und Sport': 'Einkäufe › Kleidung',
+  'Dekoration, Möbel und Instandhaltung': 'Wohnen › Einrichtung',
+  'Online-Musik und -TV': 'Abos & Medien › Streaming',
+  'Apotheke und Optik': 'Gesundheit › Apotheke',
+  'Sonstige Ausgaben': 'Sonstiges',
+  // auf der Karte ist eine Gutschrift, die keine Einzahlung ist, praktisch immer eine Erstattung
+  'Sonstiges (Einkommen)': 'Erstattungen',
+};
+
 const STOP = new Set(['sparen', 'gebühr', 'gebuehr', 'beitrag', 'versicherung', 'mitgliedsbeitrag', 'konto', 'festnetz', 'handy']);
 function contractWords(c: Contract): string[] {
   return `${c.name} ${c.payee ?? ''}`.toLowerCase().replace(/[^a-zäöüß0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length >= 4 && !STOP.has(w));
@@ -318,6 +390,12 @@ function matchContract(contracts: Contract[], r: BankRow, accountId: string | nu
 export function planBankImport(b: Book, st: BankStatement, accountId: string | null, extraRules: Rule[] = []): BankPlan {
   const rules = listRules(b);
   const contracts = listContracts(b);
+  const cats = listCategories(b);
+  const bankCats = new Map<string, string>();
+  for (const [k, path] of Object.entries(BANK_CATEGORIES)) {
+    const c = findCategoryByLabel(cats, path);
+    if (c) bankCats.set(k, c.id);
+  }
   const existing = accountId
     ? b.all<{ id: string; date: string; amount: number; payee: string | null; import_hash: string | null }>(
       'select id, date, amount, payee, import_hash from transactions where account_id = ? and date between date(?, \'-3 days\') and date(?, \'+3 days\')',
@@ -334,18 +412,21 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
   const depots = target ? accts.filter((a) => a.type === 'depot' && a.id !== accountId && norm(a.owner) === norm(target.owner)
     && target.bank && norm(a.bank).includes(norm(target.bank).split(/\s/)[0])) : [];
   const depot = depots.length === 1 ? depots[0] : depots.find((a) => !a.archived) ?? null;
-  const counter = accountId
+  const counter = accountId || st.kind === 'credit'
     ? b.all<{ id: string; account_id: string; date: string; amount: number; payee: string | null; purpose: string | null }>(
       `select id, account_id, date, amount, payee, purpose from transactions
-       where account_id <> ? and transfer_id is null and date between date(?, '-4 days') and date(?, '+4 days')`, [accountId, st.from, st.to])
+       where account_id <> ? and transfer_id is null and date between date(?, '-4 days') and date(?, '+4 days')`, [accountId ?? '', st.from, st.to])
     : [];
   const usedCounter = new Set<string>();
-  const INTERNAL = /umbuchung|übertrag|uebertrag|kontoübertrag|eigenes konto/i;
+  const INTERNAL = /umbuchung|übertrag|uebertrag|kontoübertrag|eigenes konto|einzahlung auf karte|kartenabrechnung|auszahlung von karte/i;
+  const CARD = /kreditkarte|visa|mastercard|amazon kk|\bkk\b/i;
   const words = (x: string | null) => new Set(norm(x).split(/[^a-zäöüß]+/).filter((w) => w.length >= 4 && !['gmbh', 'bank', 'konto'].includes(w)));
   // Die Gegenbuchung muss selbst nach Umbuchung aussehen oder denselben Namen tragen (nicht etwa eine Barabhebung mit gleichem Betrag)
   const plausible = (t: { payee: string | null; purpose: string | null }, r: BankRow) => {
-    if (INTERNAL.test(`${t.payee ?? ''} ${t.purpose ?? ''}`)) return true;
-    const w = words(r.payee);
+    const text = `${t.payee ?? ''} ${t.purpose ?? ''}`;
+    if (INTERNAL.test(text)) return true;
+    if (st.kind === 'credit' && CARD.test(text)) return true;
+    const w = words(`${r.payee} ${st.holder ?? ''}`);
     return [...words(t.payee)].some((x) => w.has(x));
   };
   const dayDiff = (a: string, z: string) => Math.abs(Date.parse(a) - Date.parse(z)) / 86400000;
@@ -359,11 +440,12 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
       if (m) { used.add(m.id); status = 'possible'; match = { date: m.date, payee: m.payee }; }
     }
     let transfer: PlannedRow['transfer'] = null;
-    if (status === 'new' && accountId) {
+    // auch für ein neu anzulegendes Kartenkonto, damit die Vorschau die Umbuchungen schon zeigt
+    if (status === 'new' && (accountId || st.kind === 'credit')) {
       const own = r.counterIban ? byIban.get(r.counterIban.toUpperCase()) : undefined;
       if (r.securities && depot) {
         transfer = { accountId: depot.id, accountName: depot.name, txId: null, date: r.date };
-      } else if (own || INTERNAL.test(`${r.bookingText} ${r.purpose}`)) {
+      } else if (own || INTERNAL.test(`${r.bookingText} ${r.purpose}${st.kind === 'credit' ? ` ${r.payee}` : ''}`)) {
         const m = counter
           .filter((t) => !usedCounter.has(t.id) && t.amount === -r.amount && dayDiff(t.date, r.date) <= 4 && (!own || t.account_id === own.id) && plausible(t, r))
           .sort((x, y) => dayDiff(x.date, r.date) - dayDiff(y.date, r.date)
@@ -381,6 +463,7 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
     let categoryId = findCategory(rules, input);
     let categorySource: PlannedRow['categorySource'] = categoryId ? 'rule' : null;
     if (!categoryId && contract?.category_id) { categoryId = contract.category_id; categorySource = 'contract'; }
+    if (!categoryId && r.bankCategory) { categoryId = bankCats.get(r.bankCategory) ?? null; categorySource = categoryId ? 'rule' : null; }
     if (!categoryId) { categoryId = findCategory(extraRules, input); categorySource = categoryId ? 'rule' : null; }
     if (transfer) { categoryId = null; categorySource = null; }
     return { ...r, status, match, transfer, categoryId, categorySource, contractId: contract?.id ?? null, contractName: contract?.name ?? null };
@@ -427,9 +510,10 @@ export function commitBankImport(b: Book, st: BankStatement, opts: BankCommitOpt
   return b.tx(() => {
     let accountId = opts.accountId;
     if (!accountId) {
+      const refOwner = st.refIban ? listAccounts(b, true).find((a) => a.iban?.replace(/\s/g, '').toUpperCase() === st.refIban!.toUpperCase())?.owner ?? null : null;
       accountId = saveAccount(b, {
-        name: opts.newAccount?.name || st.accountName || 'Girokonto', type: 'checking', owner: opts.newAccount?.owner ?? null,
-        bank: st.bank, iban: st.iban,
+        name: opts.newAccount?.name || st.accountName || (st.kind === 'credit' ? 'Kreditkarte' : 'Girokonto'), type: st.kind === 'credit' ? 'credit' : 'checking',
+        owner: opts.newAccount?.owner ?? refOwner, bank: st.bank, iban: st.iban,
       });
     } else if (st.iban) {
       const a = listAccounts(b, true).find((x) => x.id === accountId);
