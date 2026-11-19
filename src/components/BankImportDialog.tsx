@@ -62,13 +62,13 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
     }>
       {done ? (
         <div className="text-sm space-y-2">
-          <p>{done.imported} Buchungen wurden übernommen.</p>
+          <p>{done.imported} Buchungen wurden übernommen{done.transfers ? `, davon ${done.transfers} als Umbuchung` : ''}.</p>
           <p>Kontostand jetzt: <strong><Money cents={done.balance} colored={false} /></strong>
             {st?.endBalance != null && (done.balance === st.endBalance ? ' – stimmt mit dem Saldo der Bank überein.' : ` (laut Bank ${formatCents(st.endBalance)})`)}</p>
         </div>
       ) : (
         <div className="space-y-3 text-sm">
-          <p className="text-text-muted">CSV-Export der Umsätze aus dem Online-Banking, z. B. bei Volksbanken unter Umsätze → Export → CSV. Bereits importierte Buchungen werden erkannt und nicht doppelt übernommen.</p>
+          <p className="text-text-muted">CSV-Export der Umsätze aus dem Online-Banking, z. B. bei Volksbanken unter Umsätze → Export → CSV, bei der comdirect unter Umsätze → Export als CSV. Bereits importierte Buchungen werden erkannt und nicht doppelt übernommen.</p>
           <Field label="Datei"><input type="file" accept=".csv,text/csv" className="input py-1" onChange={(e) => read(e.target.files?.[0])} /></Field>
           {st && plan && (
             <>
@@ -86,6 +86,8 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
               </Field>
               <ul className="space-y-1">
                 <li><strong>{plan.newCount}</strong> neue Buchungen, davon {plan.categorized} mit Kategorie und {plan.contracts} einem Vertrag zugeordnet</li>
+                {plan.transfers > 0 && <li><strong>{plan.transfers}</strong> Überweisungen zwischen eigenen Konten werden als Umbuchung mit der schon vorhandenen Gegenbuchung verknüpft (zählen nicht als Einnahme oder Ausgabe)</li>}
+                {plan.depot > 0 && <li><strong>{plan.depot}</strong> Wertpapierkäufe und -verkäufe werden als Umbuchung zum Depot „{plan.depotName}“ erfasst</li>}
                 {plan.duplicates > 0 && <li><strong>{plan.duplicates}</strong> schon importiert, werden übersprungen</li>}
                 {plan.possible > 0 && (
                   <li className="text-warning">
@@ -113,8 +115,9 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
                           {r.status === 'duplicate' && <div className="text-text-muted">schon importiert</div>}
                           {r.status === 'possible' && <div className="text-warning">mögliche Dublette zu „{r.match?.payee ?? '–'}“ vom {formatDate(r.match!.date)}</div>}
                           {r.contractName && <div className="text-text-muted">Vertrag: {r.contractName}</div>}
+                          {r.transfer && <div className="text-text-muted">Umbuchung {r.amount < 0 ? 'an' : 'von'} {r.transfer.accountName}{r.transfer.txId ? ` (Gegenbuchung vom ${formatDate(r.transfer.date)})` : ''}</div>}
                         </td>
-                        <td className="p-2 whitespace-nowrap">{r.categoryId ? catName.get(r.categoryId) : <span className="text-warning">offen</span>}</td>
+                        <td className="p-2 whitespace-nowrap">{r.transfer ? 'Umbuchung' : r.categoryId ? catName.get(r.categoryId) : <span className="text-warning">offen</span>}</td>
                         <td className="p-2 text-right"><Money cents={r.amount} /></td>
                       </tr>
                     ))}

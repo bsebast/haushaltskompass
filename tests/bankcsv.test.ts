@@ -94,3 +94,78 @@ describe('Bank-CSV-Import', () => {
     expect(a.balance).toBe(143000);
   });
 });
+
+// Musterdaten im Format des comdirect-Exports (frei erfunden)
+const COMDIRECT = [
+  ';',
+  '"Umsätze Girokonto";"Zeitraum: 01.03.2026 - 31.03.2026";',
+  '"Neuer Kontostand";"1.270,00 EUR";',
+  '',
+  '"Buchungstag";"Wertstellung (Valuta)";"Vorgang";"Buchungstext";"Umsatz in EUR";',
+  '"offen";"31.03.2026";"Lastschrift / Belastung";"Auftraggeber: CAFE Buchungstext: CAFE Ref. X0";"-3,00";',
+  '"20.03.2026";"22.03.2026";"Wertpapiere";" Buchungstext: MUSTER ETF WPKNR: A0 ISIN: IE000 Ref. W1/2";"-500,00";',
+  '"10.03.2026";"10.03.2026";"Kupon";" Buchungstext: ERTRAEGNISGUTSCHRIFT VOM 10.03.26 MUSTER FONDS Ref. K1/2";"20,00";',
+  '"05.03.2026";"05.03.2026";"Übertrag / Überweisung - Echtzeit";"Empfänger: Max MusterKto/IBAN: DE00123456780000000001 BLZ/BIC: GENODEXXX  Ref. U2/1";"-50,00";',
+  '"02.03.2026";"02.03.2026";"Übertrag / Überweisung - Echtzeit";"Auftraggeber: Max Muster Buchungstext: Uebertrag auf Girokonto Ref. U1/1";"200,00";',
+  '"02.03.2026";"02.03.2026";"Lastschrift / Belastung";"Auftraggeber: EDEKA MUSTER Buchungstext: EDEKA MUSTER, ORT DE Karte Nr. 4871 78XX XXXX 0000 Kartenzahlung comdirect Visa-Debitkarte 2026-03-01 Ref. C1/1";"-10,00";',
+  '"02.03.2026";"02.03.2026";"Lastschrift / Belastung";"Auftraggeber: EDEKA MUSTER Buchungstext: EDEKA MUSTER, ORT DE Karte Nr. 4871 78XX XXXX 0000 Kartenzahlung comdirect Visa-Debitkarte 2026-03-01 Ref. C2/1";"-10,00";',
+  '',
+  '"Alter Kontostand";"1.620,00 EUR";',
+  '',
+].join('\r\n');
+
+describe('comdirect-Import', () => {
+  it('liest Kopf, Fuß und die zusammengefasste Textspalte', () => {
+    const st = parseBankCsv(COMDIRECT);
+    expect(st.bank).toBe('comdirect');
+    expect(st.accountName).toBe('Girokonto');
+    expect(st.rows).toHaveLength(6);
+    expect(st.startBalance).toBe(162000);
+    expect(st.endBalance).toBe(127000);
+    expect(st.warnings).toEqual(['1 vorgemerkte, noch nicht gebuchte Umsätze werden nicht übernommen']);
+    const edeka = st.rows.filter((r) => r.payee === 'EDEKA MUSTER');
+    expect(edeka).toHaveLength(2);
+    expect(edeka[0].purpose).toBe('EDEKA MUSTER, ORT DE');
+    expect(new Set(edeka.map((r) => r.hash)).size).toBe(2);
+    const out = st.rows.find((r) => r.amount === -5000)!;
+    expect(out.counterIban).toBe('DE00123456780000000001');
+    expect(out.payee).toBe('Max Muster');
+    expect(st.rows.find((r) => r.amount === -50000)!.securities).toBe(true);
+    expect(st.dayEnd.get('2026-03-02')).toBe(180000);
+  });
+
+  it('verknüpft Überweisungen mit der Gegenbuchung und bucht Wertpapiere zum Depot', async () => {
+    const b = await newBook();
+    // zuerst das Volksbank-Konto mit seinen Buchungen
+    const vb = parseBankCsv(CSV);
+    const vbRes = commitBankImport(b, vb, { accountId: null });
+    saveTransaction(b, { account_id: vbRes.accountId, date: '2026-03-02', amount: -20000, payee: 'Max Muster', purpose: 'Sparen', autoCategorize: false });
+    saveTransaction(b, { account_id: vbRes.accountId, date: '2026-03-06', amount: 5000, payee: 'Max Muster', autoCategorize: false });
+    const giro = saveAccount(b, { name: 'Girokonto', type: 'checking', bank: 'comdirect', owner: 'Max' });
+    const depot = saveAccount(b, { name: 'Depot', type: 'depot', bank: 'comdirect', owner: 'Max' });
+    saveAccount(b, { name: 'Depot', type: 'depot', bank: 'andere Bank', owner: 'Max' });
+
+    const st = parseBankCsv(COMDIRECT);
+    expect(suggestAccount(b, st)).toBe(giro);
+    const extra = pendingSuggestedRules(b);
+    const plan = planBankImport(b, st, giro, extra);
+    expect(plan.transfers).toBe(2);
+    expect(plan.depot).toBe(1);
+    expect(plan.depotName).toBe('Depot · Max');
+    const coupon = plan.rows.find((r) => r.amount === 2000)!;
+    expect(listCategories(b).find((c) => c.id === coupon.categoryId)?.name).toBe('Zinsen & Dividenden');
+
+    const res = commitBankImport(b, st, { accountId: giro, extraRules: extra });
+    expect(res.imported).toBe(6);
+    expect(res.transfers).toBe(3);
+    expect(res.balance).toBe(127000);
+    const tx = listTransactions(b, { kind: 'transfer' });
+    expect(tx).toHaveLength(6); // drei Umbuchungen mit je zwei Hälften
+    expect(listTransactions(b, { accountId: depot })[0].amount).toBe(50000);
+    expect(listTransactions(b, { accountId: vbRes.accountId, kind: 'transfer' })).toHaveLength(2);
+    // zweiter Import: nichts doppelt
+    const again = planBankImport(b, parseBankCsv(COMDIRECT), giro);
+    expect(again.newCount).toBe(0);
+    expect(again.duplicates).toBe(6);
+  });
+});

@@ -28,6 +28,7 @@ export const SUGGESTED_RULES: [value: string, category: string, op?: 'regex'][] 
   ['haftpflicht', 'Versicherungen › Haftpflicht'], ['hausrat', 'Versicherungen › Hausrat'],
   ['restaurant', 'Freizeit › Restaurant & Café'], ['mcdonalds', 'Freizeit › Restaurant & Café'], ['betriebsrest', 'Freizeit › Restaurant & Café'],
   ['finanzamt', 'Finanzen › Steuern'], ['rundfunk', 'Abos & Medien'],
+  ['ertraegnisgutschrift', 'Zinsen & Dividenden'], ['ertragsgutschrift', 'Zinsen & Dividenden'], ['kupon', 'Zinsen & Dividenden'],
   ['lohn-/gehalt', 'Gehalt & Lohn'], ['familienkasse', 'Kindergeld'],
   ['abschluss', 'Finanzen › Bankgebühren'], ['kartenentgelt', 'Finanzen › Bankgebühren'],
 ];
