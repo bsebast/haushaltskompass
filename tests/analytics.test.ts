@@ -7,6 +7,7 @@ import {
   contractsPlanVsActual, wealthSeries, accountAudit, listViews, saveView, deleteView, periodLabel,
 } from '../src/db/analytics';
 import { ACCOUNT_TYPES } from '../src/db/types';
+import { balancesAt, netWorth } from '../src/db/reports';
 
 async function setup() {
   const b = await newBook();
@@ -106,6 +107,18 @@ describe('Auswertungen', () => {
     expect(g.gap).toBe(0);
     expect(g.transfers).toBe(-10000);
     expect(a.find((r) => r.id === spar)!.gap).toBe(500000); // Stand nur erfasst, keine Buchungen dazu
+  });
+
+  it('externe Konten zählen nicht zum Vermögen', async () => {
+    const { b, giro } = await setup();
+    const ext = saveAccount(b, { name: 'Fremdbank (extern)', type: 'checking', owner: 'Anna', archived: true, external: true });
+    saveTransfer(b, { from_account: giro, to_account: ext, date: '2026-02-10', amount: 25000 });
+    const w = wealthSeries(b, { from: '2026-01-01', to: '2026-02-28' }, 'month', 'owner', { type: ACCOUNT_TYPES });
+    const before = 100000 + 300000 - 20000 + 320000 - 30000 - 6000 - 6500 - 50000 - 1000 - 10000;
+    expect(w.rows[1].Anna).toBe(before - 25000); // nur das Giro, das externe Gegenkonto fehlt
+    expect(netWorth(b)).toBe(before - 25000 + 10000);
+    expect(balancesAt(b, ['2026-02-28'], [ext]).get(ext)).toEqual([25000]); // einzeln abfragbar
+    expect(balancesAt(b, ['2026-02-28']).has(ext)).toBe(false);
   });
 
   it('speichert Ansichten im Haushaltsbuch', async () => {

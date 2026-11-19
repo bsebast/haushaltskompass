@@ -91,9 +91,10 @@ export function categoryTotals(
 
 /** Kontostand je Konto zu einem Stichtag (letzter Snapshot ≤ Stichtag + Buchungen danach, sonst Anfangssaldo + Buchungen). */
 export function balancesAt(b: Book, dates: string[], accountIds?: string[]): Map<string, number[]> {
-  // archivierte Konten zählen mit: ihr Verlauf gehört zur Vermögensentwicklung, heute stehen sie meist auf 0
-  const accts = b.all<{ id: string; opening_balance: number }>('select id, opening_balance from accounts')
-    .filter((a) => !accountIds || accountIds.includes(a.id));
+  // archivierte Konten zählen mit: ihr Verlauf gehört zur Vermögensentwicklung, heute stehen sie meist auf 0.
+  // Externe Konten (nur Gegenkonto für Durchbuchungen) zählen nur, wenn sie ausdrücklich angefragt werden.
+  const accts = b.all<{ id: string; opening_balance: number; external: number }>('select id, opening_balance, external from accounts')
+    .filter((a) => (accountIds ? accountIds.includes(a.id) : !a.external));
   const snaps = b.all<{ account_id: string; date: string; balance: number }>('select account_id, date, balance from balance_snapshots order by date');
   const tx = b.all<{ account_id: string; date: string; s: number; auto: number }>(
     'select account_id, date, sum(amount) as s, sum(case when auto_counterpart = 1 then amount else 0 end) as auto from transactions group by account_id, date order by date');
@@ -231,5 +232,5 @@ export function savingHints(b: Book, month: string): SavingHint[] {
 }
 
 export function netWorth(b: Book): number {
-  return listAccounts(b).reduce((a, x) => a + x.balance, 0);
+  return listAccounts(b).filter((x) => !x.external).reduce((a, x) => a + x.balance, 0);
 }

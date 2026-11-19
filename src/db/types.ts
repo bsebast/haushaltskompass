@@ -26,6 +26,8 @@ export interface Account {
   note: string | null;
   sort_order: number;
   archived: number;
+  /** Externes Konto: nur Gegenkonto für Durchbuchungen, zählt nicht zum Vermögen */
+  external: number;
   balance: number;
   /** Datum des letzten erfassten Kontostands, falls vorhanden */
   balance_date: string | null;

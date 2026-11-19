@@ -3,7 +3,7 @@ import schema from './schema.sql?raw';
 import { seedDefaults } from './seed';
 import { now } from '../lib/id';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /** Migrationen von Version n-1 auf n. Neue Bücher starten mit schema.sql (Version 1) und durchlaufen alle Migrationen. */
 const MIGRATIONS: Record<number, string> = {
@@ -95,6 +95,9 @@ const MIGRATIONS: Record<number, string> = {
   4: `
     alter table transactions add column counter_iban text;
     alter table transactions add column auto_counterpart integer not null default 0;
+  `,
+  5: `
+    alter table accounts add column external integer not null default 0;
   `,
 };
 
