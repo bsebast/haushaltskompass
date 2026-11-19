@@ -3,7 +3,9 @@ import { newBook } from './helpers';
 import {
   saveAccount, listAccounts, saveTransaction, saveTransfer, listTransactions, deleteTransaction,
   listCategories, saveRule, saveBudget, applyRulesToUncategorized, deleteCategory,
+  deleteAccount, deletePerson, personSummary, saveSnapshot, saveHolding, savePension,
 } from '../src/db/repo';
+import { saveContract, listContracts } from '../src/db/contracts';
 import { monthlyTotals, categoryTotals, budgetStatus, balanceTrend } from '../src/db/reports';
 
 const cat = (b: Awaited<ReturnType<typeof newBook>>, name: string) => listCategories(b).find((c) => c.name === name)!.id;
@@ -96,5 +98,32 @@ describe('Datenlayer', () => {
     saveTransaction(b, { account_id: g, date: '2026-11-05', amount: -999, category_id: s });
     deleteCategory(b, s, cat(b, 'Software'));
     expect(listTransactions(b)[0].category_name).toBe('Software');
+  });
+
+  it('Person entfernen: Konten, Buchungen, Depot und Vorsorge weg, Verträge bleiben', async () => {
+    const b = await newBook();
+    const eltern = saveAccount(b, { name: 'Giro', type: 'checking', owner: 'Eltern' });
+    const kind = saveAccount(b, { name: 'Kinderkonto', type: 'checking', owner: 'Kind' });
+    const depot = saveAccount(b, { name: 'Depot', type: 'depot', owner: 'Kind' });
+    saveTransaction(b, { account_id: kind, date: '2026-03-01', amount: -500, payee: 'Kiosk' });
+    saveTransfer(b, { from_account: eltern, to_account: kind, date: '2026-03-02', amount: 2000 });
+    saveSnapshot(b, kind, '2026-03-31', 1500);
+    saveHolding(b, { account_id: depot, owner: 'Kind', wkn: null, isin: null, name: 'Fonds', quantity: 1, cost_value: null, price: null, market_value: 10000, as_of: null });
+    saveHolding(b, { account_id: null, owner: 'Kind', wkn: null, isin: null, name: 'Sparbrief', quantity: 1, cost_value: null, price: null, market_value: 5000, as_of: null });
+    savePension(b, { person: 'Kind', provider: 'Muster Rente', contribution: null, interval: null, lump_sum: null, monthly_pension: null, projection1: null, projection2: null, projection3: null, start_text: null, as_of: null, advisor: null, death_action: null, note: null });
+    saveContract(b, { name: 'Taschengeld Kind', amount: -2000, interval: 'monthly', account_id: kind, status: 'confirmed' });
+
+    expect(personSummary(b, 'Kind')).toEqual({ accounts: 2, transactions: 2, snapshots: 1, holdings: 2, pensions: 1 });
+    deletePerson(b, 'Kind');
+    expect(listAccounts(b, true).map((a) => a.name)).toEqual(['Giro']);
+    const rest = listTransactions(b);
+    expect(rest).toHaveLength(1);
+    expect(rest[0]).toMatchObject({ account_id: eltern, amount: -2000, transfer_id: null });
+    expect(b.get<{ n: number }>('select count(*) n from holdings')!.n).toBe(0);
+    expect(b.get<{ n: number }>('select count(*) n from pensions')!.n).toBe(0);
+    expect(listContracts(b)).toHaveLength(1);
+    expect(listContracts(b)[0].account_id).toBeNull();
+    deleteAccount(b, eltern);
+    expect(listAccounts(b, true)).toHaveLength(0);
   });
 });

@@ -65,15 +65,46 @@ export function saveAccount(b: Book, a: AccountInput): string {
 }
 
 export function deleteAccount(b: Book, id: string) {
-  b.tx(() => {
-    // Gegenbuchungen von Umbuchungen auf anderen Konten werden zu normalen Buchungen
-    b.run(
-      `update transactions set transfer_id = null
-       where transfer_id in (select transfer_id from transactions where account_id = ? and transfer_id is not null)
-         and account_id <> ?`,
-      [id, id],
-    );
-    b.run('delete from accounts where id = ?', [id]);
+  b.tx(() => removeAccount(b, id));
+}
+
+function removeAccount(b: Book, id: string) {
+  // Gegenbuchungen von Umbuchungen auf anderen Konten werden zu normalen Buchungen
+  b.run(
+    `update transactions set transfer_id = null
+     where transfer_id in (select transfer_id from transactions where account_id = ? and transfer_id is not null)
+       and account_id <> ?`,
+    [id, id],
+  );
+  // Verträge bleiben erhalten, nur ohne Abbuchungskonto; Depotpositionen des Kontos gehen mit
+  b.run('update recurring set account_id = null where account_id = ?', [id]);
+  b.run('delete from holdings where account_id = ?', [id]);
+  b.run('delete from accounts where id = ?', [id]);
+}
+
+/** Was beim Entfernen einer Person wegfällt (Konten, Buchungen, Kontostände, Depotpositionen, Vorsorge). */
+export interface PersonSummary { accounts: number; transactions: number; snapshots: number; holdings: number; pensions: number }
+
+export function personSummary(b: Book, owner: string): PersonSummary {
+  const ids = `select id from accounts where owner = ?`;
+  const n = (sql: string, p: string[]) => b.get<{ n: number }>(sql, p)?.n ?? 0;
+  return {
+    accounts: n('select count(*) n from accounts where owner = ?', [owner]),
+    transactions: n(`select count(*) n from transactions where account_id in (${ids})`, [owner]),
+    snapshots: n(`select count(*) n from balance_snapshots where account_id in (${ids})`, [owner]),
+    holdings: n(`select count(*) n from holdings where owner = ? or account_id in (${ids})`, [owner, owner]),
+    pensions: n('select count(*) n from pensions where person = ?', [owner]),
+  };
+}
+
+/** Entfernt alle Konten einer Person samt Buchungen, Kontoständen, Depotpositionen und Vorsorge. Verträge bleiben. */
+export function deletePerson(b: Book, owner: string): PersonSummary {
+  return b.tx(() => {
+    const sum = personSummary(b, owner);
+    for (const { id } of b.all<{ id: string }>('select id from accounts where owner = ?', [owner])) removeAccount(b, id);
+    b.run('delete from holdings where owner = ?', [owner]);
+    b.run('delete from pensions where person = ?', [owner]);
+    return sum;
   });
 }
 

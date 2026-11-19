@@ -5,7 +5,7 @@ import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Modal, Field, ErrorNote, Empty } from '../components/ui';
 import AmountInput from '../components/AmountInput';
 import { BalanceChart } from '../components/charts';
-import { listAccounts, saveAccount, deleteAccount, listSnapshots, saveSnapshot, deleteSnapshot } from '../db/repo';
+import { listAccounts, saveAccount, deleteAccount, deletePerson, personSummary, listSnapshots, saveSnapshot, deleteSnapshot } from '../db/repo';
 import { balanceTrend } from '../db/reports';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../db/types';
 import { useTxDialog } from '../components/Layout';
@@ -19,6 +19,14 @@ export default function Accounts() {
   const [edit, setEdit] = useState<Account | 'new' | null>(null);
   const [history, setHistory] = useState<Account | null>(null);
   const { openNew } = useTxDialog();
+  const book = useBook();
+  const removePerson = (o: string) => {
+    const s = personSummary(book, o);
+    const parts = [`${s.accounts} Konten`, `${s.transactions} Buchungen`, `${s.snapshots} Kontostände`, `${s.holdings} Depotpositionen`, `${s.pensions} Vorsorge-Einträge`];
+    if (!window.confirm(`Alles von „${o}“ löschen?\n\n${parts.join(', ')}.\n\nVerträge bleiben erhalten. Umbuchungen zu diesen Konten werden auf den übrigen Konten zu normalen Buchungen. Das lässt sich nicht rückgängig machen. Lege vorher eine Sicherung an.`)) return;
+    deletePerson(book, o);
+    setOwner(null);
+  };
   const owners = useMemo(() => [...new Set(accounts.map((a) => a.owner ?? ''))].sort(), [accounts]);
   const shown = accounts.filter((a) => owner === null || (a.owner ?? '') === owner);
   const groups = owners.filter((o) => owner === null || o === owner).map((o) => ({ owner: o, items: shown.filter((a) => (a.owner ?? '') === o) }));
@@ -51,7 +59,14 @@ export default function Accounts() {
               {owners.length > 1 && (
                 <div className="flex items-center justify-between px-4 py-2.5 bg-surface-2 rounded-t-lg">
                   <h2 className="font-semibold text-sm">{g.owner || 'Ohne Inhaber'}</h2>
-                  <Money cents={sub} className="font-semibold text-sm" />
+                  <div className="flex items-center gap-2">
+                    <Money cents={sub} className="font-semibold text-sm" />
+                    {g.owner && (
+                      <button className="btn-ghost h-7 px-2 text-text-muted hover:text-danger" title={`Konten von ${g.owner} löschen`} aria-label={`Konten von ${g.owner} löschen`} onClick={() => removePerson(g.owner)}>
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
               {g.items.map((a) => (
