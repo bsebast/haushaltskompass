@@ -35,7 +35,7 @@ export default function Dashboard() {
   const open = useQuery((b) => listTransactions(b, { uncategorized: true }).length);
   const contracts = useQuery((b) => listContracts(b));
   const { openNew } = useTxDialog();
-  const total = accounts.reduce((s, a) => s + a.balance, 0);
+  const total = accounts.filter((a) => !a.external).reduce((s, a) => s + a.balance, 0);
 
   if (!recent.length && !contracts.length) {
     return (

@@ -31,7 +31,7 @@ export default function Accounts() {
   const owners = useMemo(() => [...new Set(accounts.map((a) => a.owner ?? ''))].sort(), [accounts]);
   const shown = accounts.filter((a) => owner === null || (a.owner ?? '') === owner);
   const groups = owners.filter((o) => owner === null || o === owner).map((o) => ({ owner: o, items: shown.filter((a) => (a.owner ?? '') === o) }));
-  const total = shown.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
+  const total = shown.filter((a) => !a.archived && !a.external).reduce((s, a) => s + a.balance, 0);
 
   return (
     <>
@@ -55,7 +55,7 @@ export default function Accounts() {
       {accounts.length === 0 && <div className="card"><Empty title="Noch keine Konten" action={<button className="btn-primary" onClick={() => setEdit('new')}>Konto anlegen</button>} /></div>}
       <div className="space-y-4">
         {groups.map((g) => {
-          const sub = g.items.filter((a) => !a.archived).reduce((s, a) => s + a.balance, 0);
+          const sub = g.items.filter((a) => !a.archived && !a.external).reduce((s, a) => s + a.balance, 0);
           return (
             <section key={g.owner || '-'} className="card divide-y divide-border">
               {owners.length > 1 && (
@@ -78,7 +78,7 @@ export default function Accounts() {
                     <div className="text-xs text-text-muted">
                       {[ACCOUNT_TYPES[a.type], a.interest_rate ? `${(a.interest_rate * 100).toLocaleString('de-DE', { maximumFractionDigits: 2 })} % Zinsen` : null,
                         a.exemption ? `Freistellung ${formatCents(a.exemption)}${a.exemption_used != null ? `, verbraucht ${formatCents(a.exemption_used)}` : ''}` : null,
-                        a.balance_date ? `Stand ${formatDate(a.balance_date)}` : null, a.archived ? 'archiviert' : null].filter(Boolean).join(' · ')}
+                        a.balance_date ? `Stand ${formatDate(a.balance_date)}` : null, a.external ? 'extern' : null, a.archived ? 'archiviert' : null].filter(Boolean).join(' · ')}
                     </div>
                     {a.note && <div className="text-xs text-warning">{a.note}</div>}
                   </div>
@@ -165,6 +165,7 @@ function AccountDialog({ account, onClose, owners }: { account: Account | null; 
   const [used, setUsed] = useState<number | null>(account?.exemption_used ?? null);
   const [note, setNote] = useState(account?.note ?? '');
   const [archived, setArchived] = useState(!!account?.archived);
+  const [external, setExternal] = useState(!!account?.external);
   const [error, setError] = useState<string | null>(null);
 
   const save = () => {
@@ -173,7 +174,7 @@ function AccountDialog({ account, onClose, owners }: { account: Account | null; 
       if (r != null && Number.isNaN(r)) throw new Error('Ungültiger Zinssatz.');
       saveAccount(book, {
         id: account?.id, name, type, owner: owner || null, bank: bank || null, iban: iban.replace(/\s/g, '') || null,
-        opening_balance: (negative ? -1 : 1) * (opening ?? 0), archived, interest_rate: r, exemption, exemption_used: used, note: note || null,
+        opening_balance: (negative ? -1 : 1) * (opening ?? 0), archived, external, interest_rate: r, exemption, exemption_used: used, note: note || null,
       });
       onClose();
     } catch (e) { setError((e as Error).message); }
@@ -215,6 +216,7 @@ function AccountDialog({ account, onClose, owners }: { account: Account | null; 
           <Field label="davon verbraucht"><AmountInput value={used} onChange={setUsed} /></Field>
         </div>
         <Field label="Bemerkung"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={external} onChange={(e) => setExternal(e.target.checked)} /> Externes Konto (nur Gegenkonto für Durchbuchungen, zählt nicht zum Vermögen)</label>
         {account && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Konto archivieren (wird ausgeblendet)</label>}
         <button type="submit" hidden />
         <ErrorNote error={error} />

@@ -8,8 +8,9 @@ import { currentMonth, addMonths, formatDate, monthRange } from '../lib/dates';
 import { ACCOUNT_TYPES } from '../db/types';
 
 export default function Wealth() {
-  const accounts = useQuery((b) => listAccounts(b));
-  const allAccounts = useQuery((b) => listAccounts(b, true));
+  // externe Konten (nur Durchbuchungen) gehören nicht zum Vermögen
+  const accounts = useQuery((b) => listAccounts(b).filter((a) => !a.external));
+  const allAccounts = useQuery((b) => listAccounts(b, true).filter((a) => !a.external));
   const holdings = useQuery(listHoldings);
   const snaps = useQuery((b) => listSnapshots(b));
   const [owner, setOwner] = useState<string | null>(null); // null = alle

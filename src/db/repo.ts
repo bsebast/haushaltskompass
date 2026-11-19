@@ -36,6 +36,8 @@ export interface AccountInput {
   opening_balance?: number;
   iban?: string | null;
   archived?: boolean;
+  /** Externes Konto: nur Gegenkonto für Durchbuchungen, zählt nicht zum Vermögen */
+  external?: boolean;
   bank?: string | null;
   interest_rate?: number | null;
   exemption?: number | null;
@@ -49,8 +51,8 @@ export function saveAccount(b: Book, a: AccountInput): string {
   const t = now();
   if (a.id) {
     b.run(
-      `update accounts set name=?, type=?, owner=?, opening_balance=?, iban=?, archived=?, bank=?, interest_rate=?, exemption=?, exemption_used=?, note=?, updated_at=? where id=?`,
-      [name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, a.archived ? 1 : 0, a.bank ?? null, a.interest_rate ?? null,
+      `update accounts set name=?, type=?, owner=?, opening_balance=?, iban=?, archived=?, external=?, bank=?, interest_rate=?, exemption=?, exemption_used=?, note=?, updated_at=? where id=?`,
+      [name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, a.archived ? 1 : 0, a.external ? 1 : 0, a.bank ?? null, a.interest_rate ?? null,
         a.exemption ?? null, a.exemption_used ?? null, a.note ?? null, t, a.id],
     );
     return a.id;
@@ -58,9 +60,9 @@ export function saveAccount(b: Book, a: AccountInput): string {
   const id = uid();
   const order = (b.value<number>('select coalesce(max(sort_order), -1) + 1 from accounts') ?? 0) as number;
   b.run(
-    `insert into accounts (id, name, type, owner, opening_balance, iban, archived, bank, interest_rate, exemption, exemption_used, note, sort_order, created_at, updated_at)
-     values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [id, name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, a.archived ? 1 : 0, a.bank ?? null, a.interest_rate ?? null,
+    `insert into accounts (id, name, type, owner, opening_balance, iban, archived, external, bank, interest_rate, exemption, exemption_used, note, sort_order, created_at, updated_at)
+     values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, a.archived ? 1 : 0, a.external ? 1 : 0, a.bank ?? null, a.interest_rate ?? null,
       a.exemption ?? null, a.exemption_used ?? null, a.note ?? null, order, t, t],
   );
   return id;

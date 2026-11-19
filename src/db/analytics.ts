@@ -282,7 +282,7 @@ export function wealthSeries(b: Book, fIn: ReportFilter, g: Granularity, group: 
     if (g === 'quarter') { const q = Number(k.slice(6)); return monthRange(`${k.slice(0, 4)}-${String(q * 3).padStart(2, '0')}`).to; }
     return monthRange(k).to;
   }).map((d) => (d > f.to ? f.to : d));
-  let accts = b.all<{ id: string; name: string; type: string; owner: string | null }>('select id, name, type, owner from accounts');
+  let accts = b.all<{ id: string; name: string; type: string; owner: string | null }>('select id, name, type, owner from accounts where external = 0');
   if (f.accountIds?.length) accts = accts.filter((a) => f.accountIds!.includes(a.id));
   if (f.owners?.length) accts = accts.filter((a) => f.owners!.includes(a.owner ?? ''));
   const per = balancesAt(b, ends, accts.map((a) => a.id));
