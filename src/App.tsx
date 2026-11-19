@@ -11,6 +11,8 @@ import Budgets from './pages/Budgets';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Contracts from './pages/Contracts';
+import Wealth from './pages/Wealth';
+import Pensions from './pages/Pensions';
 
 export default function App() {
   const { status, error } = useBookCtx();
@@ -37,6 +39,8 @@ export default function App() {
         <Route path="kategorien" element={<Categories />} />
         <Route path="regeln" element={<Rules />} />
         <Route path="vertraege" element={<Contracts />} />
+        <Route path="vermoegen" element={<Wealth />} />
+        <Route path="vorsorge" element={<Pensions />} />
         <Route path="budgets" element={<Budgets />} />
         <Route path="auswertungen" element={<Reports />} />
         <Route path="einstellungen" element={<Settings />} />

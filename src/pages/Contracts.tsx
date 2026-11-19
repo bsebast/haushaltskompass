@@ -17,13 +17,14 @@ export default function Contracts() {
   const [person, setPerson] = useState('');
   const [kind, setKind] = useState('');
   const [search, setSearch] = useState('');
+  const [deathOnly, setDeathOnly] = useState(false);
   const [edit, setEdit] = useState<Contract | 'new' | null>(null);
   const [importing, setImporting] = useState(false);
 
   const persons = useMemo(() => [...new Set(all.map((c) => c.person).filter(Boolean) as string[])].sort(), [all]);
   const kinds = useMemo(() => [...new Set(all.map((c) => c.kind).filter(Boolean) as string[])].sort(), [all]);
   const rows = all.filter((c) =>
-    (!person || c.person === person) && (!kind || c.kind === kind) &&
+    (!person || c.person === person) && (!kind || c.kind === kind) && (!deathOnly || (!!c.death_action && c.death_action !== '-')) &&
     (!search || `${c.name} ${c.purpose ?? ''} ${c.note ?? ''}`.toLowerCase().includes(search.toLowerCase())));
   const active = rows.filter((c) => c.status === 'confirmed');
   const monthly = active.reduce((a, c) => a + perMonth(c), 0);
@@ -90,6 +91,7 @@ export default function Contracts() {
                             <div className="font-medium">{c.name}</div>
                             <div className="text-xs text-text-muted">{[c.purpose, c.kind, c.payment_method].filter(Boolean).join(' · ')}</div>
                             {c.note && <div className="text-xs text-warning">{c.note}</div>}
+                            {(c.death_action || c.notice_period || c.doc_ref) && <div className="text-xs text-text-muted">{[c.notice_period ? `Kündigungsfrist ${c.notice_period}` : null, c.death_action ? `Todesfall: ${c.death_action}` : null, c.doc_ref ? `Ablage ${c.doc_ref}` : null, c.advisor ? `über ${c.advisor}` : null].filter(Boolean).join(' · ')}</div>}
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap">{c.person ?? '–'}</td>
                           <td className="px-2 py-2 whitespace-nowrap">{c.category_name ? <span className="inline-flex items-center gap-1.5"><Dot color={c.category_color} />{c.category_name}</span> : <span className="text-text-muted">–</span>}</td>
@@ -112,6 +114,9 @@ export default function Contracts() {
               </div>
               <label className="flex items-center gap-2 text-sm text-text-muted mt-3">
                 <input type="checkbox" checked={showEnded} onChange={(e) => setShowEnded(e.target.checked)} /> Beendete Verträge zeigen
+              </label>
+              <label className="flex items-center gap-2 text-sm text-text-muted mt-1">
+                <input type="checkbox" checked={deathOnly} onChange={(e) => setDeathOnly(e.target.checked)} /> Nur Verträge mit Aktion im Todesfall (Checkliste)
               </label>
             </div>
 
@@ -164,6 +169,10 @@ function ContractDialog({ contract: c, onClose, kinds, persons }: { contract: Co
   const [payment, setPayment] = useState(c?.payment_method ?? '');
   const [note, setNote] = useState(c?.note ?? '');
   const [ended, setEnded] = useState(c?.status === 'ended');
+  const [notice, setNotice] = useState(c?.notice_period ?? '');
+  const [docRef, setDocRef] = useState(c?.doc_ref ?? '');
+  const [advisor, setAdvisor] = useState(c?.advisor ?? '');
+  const [deathAction, setDeathAction] = useState(c?.death_action ?? '');
   const [error, setError] = useState<string | null>(null);
 
   const save = () => {
@@ -173,7 +182,8 @@ function ContractDialog({ contract: c, onClose, kinds, persons }: { contract: Co
       saveContract(book, {
         id: c?.id, name, person: person || null, purpose: purpose || null, kind: kind || null, amount: (income ? 1 : -1) * amount, interval,
         due_day: d.day, due_months: d.months, category_id: category, account_id: account || null, payment_method: payment || null,
-        note: note || null, status: ended ? 'ended' : 'confirmed', end_date: ended ? c?.end_date ?? new Date().toISOString().slice(0, 10) : null,
+        note: note || null, notice_period: notice || null, doc_ref: docRef || null, advisor: advisor || null, death_action: deathAction || null,
+        start_date: c?.start_date ?? null, status: ended ? 'ended' : 'confirmed', end_date: ended ? c?.end_date ?? new Date().toISOString().slice(0, 10) : null,
       });
       onClose();
     } catch (e) { setError((e as Error).message); }
@@ -215,6 +225,13 @@ function ContractDialog({ contract: c, onClose, kinds, persons }: { contract: Co
             <datalist id="c-pay">{['Lastschrift', 'Dauerauftrag', 'Überweisung', 'Rechnung', 'Kreditkarte', 'PayPal'].map((p) => <option key={p} value={p} />)}</datalist></Field>
         </div>
         <Field label="Bemerkung"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Kündigungsfrist"><input className="input" value={notice} onChange={(e) => setNotice(e.target.value)} placeholder="z. B. 3 Monate" /></Field>
+          <Field label="Ablage-Nr."><input className="input" value={docRef} onChange={(e) => setDocRef(e.target.value)} /></Field>
+          <Field label="Über Berater"><input className="input" value={advisor} onChange={(e) => setAdvisor(e.target.value)} /></Field>
+          <Field label="Aktion im Todesfall"><input className="input" list="c-death" value={deathAction} onChange={(e) => setDeathAction(e.target.value)} />
+            <datalist id="c-death">{['kündigen', 'umschreiben', 'Info an Versicherer, Auszahlung Todesfallleistung'].map((x) => <option key={x} value={x} />)}</datalist></Field>
+        </div>
         {c && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={ended} onChange={(e) => setEnded(e.target.checked)} /> Vertrag ist beendet oder gekündigt</label>}
         <button type="submit" hidden />
         <ErrorNote error={error} />

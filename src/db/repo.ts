@@ -1,15 +1,28 @@
 import type { Book } from './core';
-import type { Account, AccountType, Budget, Category, CategoryNode, Rule, Split, Transaction } from './types';
+import type { Account, AccountType, Budget, Category, CategoryNode, Holding, Pension, Rule, Snapshot, Split, Transaction } from './types';
 import { findCategory } from './rules';
 import { uid, now } from '../lib/id';
 
 /* ---------- Konten ---------- */
 
+/**
+ * Kontostand = letzter erfasster Kontostand (Snapshot) + Buchungen danach;
+ * ohne Snapshot: Anfangssaldo + alle Buchungen.
+ */
 export function listAccounts(b: Book, includeArchived = false): Account[] {
   return b.all<Account>(
-    `select a.*, a.opening_balance + coalesce((select sum(amount) from transactions t where t.account_id = a.id), 0) as balance
-     from accounts a ${includeArchived ? '' : 'where a.archived = 0'}
-     order by a.archived, a.sort_order, a.name collate nocase`,
+    `with anchor as (
+       select account_id, max(date) as date from balance_snapshots group by account_id
+     )
+     select a.*, an.date as balance_date,
+       case when an.date is null
+         then a.opening_balance + coalesce((select sum(amount) from transactions t where t.account_id = a.id), 0)
+         else (select balance from balance_snapshots s where s.account_id = a.id and s.date = an.date)
+              + coalesce((select sum(amount) from transactions t where t.account_id = a.id and t.date > an.date), 0)
+       end as balance
+     from accounts a left join anchor an on an.account_id = a.id
+     ${includeArchived ? '' : 'where a.archived = 0'}
+     order by a.archived, coalesce(a.owner, '') collate nocase, a.sort_order, a.name collate nocase`,
   );
 }
 
@@ -21,6 +34,11 @@ export interface AccountInput {
   opening_balance?: number;
   iban?: string | null;
   archived?: boolean;
+  bank?: string | null;
+  interest_rate?: number | null;
+  exemption?: number | null;
+  exemption_used?: number | null;
+  note?: string | null;
 }
 
 export function saveAccount(b: Book, a: AccountInput): string {
@@ -29,16 +47,19 @@ export function saveAccount(b: Book, a: AccountInput): string {
   const t = now();
   if (a.id) {
     b.run(
-      'update accounts set name=?, type=?, owner=?, opening_balance=?, iban=?, archived=?, updated_at=? where id=?',
-      [name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, a.archived ? 1 : 0, t, a.id],
+      `update accounts set name=?, type=?, owner=?, opening_balance=?, iban=?, archived=?, bank=?, interest_rate=?, exemption=?, exemption_used=?, note=?, updated_at=? where id=?`,
+      [name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, a.archived ? 1 : 0, a.bank ?? null, a.interest_rate ?? null,
+        a.exemption ?? null, a.exemption_used ?? null, a.note ?? null, t, a.id],
     );
     return a.id;
   }
   const id = uid();
   const order = (b.value<number>('select coalesce(max(sort_order), -1) + 1 from accounts') ?? 0) as number;
   b.run(
-    'insert into accounts (id, name, type, owner, opening_balance, iban, sort_order, created_at, updated_at) values (?,?,?,?,?,?,?,?,?)',
-    [id, name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, order, t, t],
+    `insert into accounts (id, name, type, owner, opening_balance, iban, archived, bank, interest_rate, exemption, exemption_used, note, sort_order, created_at, updated_at)
+     values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, name, a.type, a.owner ?? null, a.opening_balance ?? 0, a.iban ?? null, a.archived ? 1 : 0, a.bank ?? null, a.interest_rate ?? null,
+      a.exemption ?? null, a.exemption_used ?? null, a.note ?? null, order, t, t],
   );
   return id;
 }
@@ -412,4 +433,76 @@ export function saveBudget(b: Book, x: Omit<Budget, 'id' | 'valid_to'> & { id?: 
 
 export function deleteBudget(b: Book, id: string) {
   b.run('delete from budgets where id = ?', [id]);
+}
+
+/* ---------- Kontostände (Snapshots) ---------- */
+
+export function listSnapshots(b: Book, accountId?: string): Snapshot[] {
+  return accountId
+    ? b.all<Snapshot>('select * from balance_snapshots where account_id = ? order by date', [accountId])
+    : b.all<Snapshot>('select * from balance_snapshots order by date');
+}
+
+/** Erfasst einen Kontostand an einem Tag (ersetzt einen vorhandenen am selben Tag). */
+export function saveSnapshot(b: Book, accountId: string, date: string, balance: number, note: string | null = null) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Ungültiges Datum.');
+  if (!Number.isInteger(balance)) throw new Error('Ungültiger Betrag.');
+  b.run(
+    `insert into balance_snapshots (id, account_id, date, balance, note) values (?,?,?,?,?)
+     on conflict(account_id, date) do update set balance = excluded.balance, note = excluded.note`,
+    [uid(), accountId, date, balance, note],
+  );
+}
+
+export function deleteSnapshot(b: Book, id: string) {
+  b.run('delete from balance_snapshots where id = ?', [id]);
+}
+
+/* ---------- Depotpositionen ---------- */
+
+export function listHoldings(b: Book): Holding[] {
+  return b.all<Holding>('select * from holdings order by coalesce(owner, \'\') collate nocase, market_value desc');
+}
+
+export function saveHolding(b: Book, h: Omit<Holding, 'id'> & { id?: string }): string {
+  if (!h.name.trim()) throw new Error('Bitte einen Namen eingeben.');
+  const t = now();
+  const vals = [h.account_id, h.owner, h.wkn, h.isin, h.name.trim(), h.quantity, h.cost_value, h.price, h.market_value, h.as_of, t];
+  if (h.id) {
+    b.run('update holdings set account_id=?, owner=?, wkn=?, isin=?, name=?, quantity=?, cost_value=?, price=?, market_value=?, as_of=?, updated_at=? where id=?', [...vals, h.id]);
+    return h.id;
+  }
+  const id = uid();
+  b.run('insert into holdings (account_id, owner, wkn, isin, name, quantity, cost_value, price, market_value, as_of, updated_at, id, created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?)', [...vals, id, t]);
+  return id;
+}
+
+export function deleteHolding(b: Book, id: string) {
+  b.run('delete from holdings where id = ?', [id]);
+}
+
+/* ---------- Vorsorge ---------- */
+
+export function listPensions(b: Book): Pension[] {
+  return b.all<Pension>('select * from pensions order by coalesce(person, \'\') collate nocase, provider collate nocase');
+}
+
+export function savePension(b: Book, p: Omit<Pension, 'id'> & { id?: string }): string {
+  if (!p.provider.trim()) throw new Error('Bitte den Anbieter eingeben.');
+  const t = now();
+  const vals = [p.person, p.provider.trim(), p.contribution, p.interval, p.lump_sum, p.monthly_pension, p.projection1, p.projection2, p.projection3,
+    p.start_text, p.as_of, p.advisor, p.death_action, p.note, t];
+  if (p.id) {
+    b.run(`update pensions set person=?, provider=?, contribution=?, interval=?, lump_sum=?, monthly_pension=?, projection1=?, projection2=?, projection3=?,
+      start_text=?, as_of=?, advisor=?, death_action=?, note=?, updated_at=? where id=?`, [...vals, p.id]);
+    return p.id;
+  }
+  const id = uid();
+  b.run(`insert into pensions (person, provider, contribution, interval, lump_sum, monthly_pension, projection1, projection2, projection3,
+    start_text, as_of, advisor, death_action, note, updated_at, id, created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, [...vals, id, t]);
+  return id;
+}
+
+export function deletePension(b: Book, id: string) {
+  b.run('delete from pensions where id = ?', [id]);
 }

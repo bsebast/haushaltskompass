@@ -38,3 +38,8 @@ Informationscenter mit Finanznachrichten,dashboard,could,yes,skip,redaktioneller
 Lizenzaktivierung und Updatedienst,system,could,yes,skip,gehört zum Vertrieb des Originals
 Fernwartung und Support,service,could,yes,skip,Dienstleistung des Anbieters
 Verträge und Fixkosten mit Fälligkeiten verwalten,fixkosten,should,no,yes,eigene Ergänzung inkl. CSV-Import
+"Konten nach Person mit Bank, Zins und Freistellungsauftrag",konten,should,no,yes,eigene Ergänzung
+Kontostände zu Stichtagen und Vermögensverlauf,vermögen,should,no,yes,eigene Ergänzung
+Depotpositionen,vermögen,could,no,yes,"manuell/Import, keine Kursabfrage"
+Vorsorge und Renten,vorsorge,could,no,yes,eigene Ergänzung
+Gesamtimport (JSON),import,could,no,yes,"Konten, Stände, Buchungen, Depots, Verträge, Vorsorge"

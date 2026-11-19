@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText } from 'lucide-react';
+import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText, Landmark, Umbrella } from 'lucide-react';
 import { useBookCtx } from '../state';
 import TxDialog, { type TxMode } from './TxDialog';
 import type { Transaction } from '../db/types';
@@ -14,6 +14,8 @@ const NAV = [
   { to: '/buchungen', label: 'Buchungen', icon: ListOrdered },
   { to: '/konten', label: 'Konten', icon: Wallet },
   { to: '/vertraege', label: 'Verträge', icon: FileText },
+  { to: '/vermoegen', label: 'Vermögen', icon: Landmark },
+  { to: '/vorsorge', label: 'Vorsorge', icon: Umbrella },
   { to: '/budgets', label: 'Budgets', icon: Target },
   { to: '/auswertungen', label: 'Auswertungen', icon: BarChart3 },
   { to: '/kategorien', label: 'Kategorien', icon: Tags },

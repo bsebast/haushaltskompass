@@ -37,6 +37,10 @@ export interface Contract {
   note: string | null;
   start_date: string | null;
   end_date: string | null;
+  notice_period: string | null;
+  doc_ref: string | null;
+  advisor: string | null;
+  death_action: string | null;
   status: 'suggested' | 'confirmed' | 'ended' | 'dismissed';
 }
 
@@ -65,6 +69,10 @@ export interface ContractInput {
   note?: string | null;
   start_date?: string | null;
   end_date?: string | null;
+  notice_period?: string | null;
+  doc_ref?: string | null;
+  advisor?: string | null;
+  death_action?: string | null;
   status?: 'confirmed' | 'ended';
 }
 
@@ -77,12 +85,13 @@ export function saveContract(b: Book, c: ContractInput): string {
   const t = now();
   const vals = [
     name, name, c.person ?? null, c.purpose ?? null, c.kind ?? null, c.category_id ?? null, c.account_id ?? null, c.amount, c.interval,
-    c.due_day ?? null, months, c.payment_method ?? null, c.note ?? null, c.start_date ?? null, c.end_date ?? null, c.status ?? 'confirmed', t,
+    c.due_day ?? null, months, c.payment_method ?? null, c.note ?? null, c.start_date ?? null, c.end_date ?? null,
+    c.notice_period ?? null, c.doc_ref ?? null, c.advisor ?? null, c.death_action ?? null, c.status ?? 'confirmed', t,
   ];
   if (c.id) {
     b.run(
       `update recurring set name=?, payee=?, person=?, purpose=?, kind=?, category_id=?, account_id=?, amount=?, interval=?, due_day=?, due_months=?,
-       payment_method=?, note=?, start_date=?, end_date=?, status=?, updated_at=? where id=?`,
+       payment_method=?, note=?, start_date=?, end_date=?, notice_period=?, doc_ref=?, advisor=?, death_action=?, status=?, updated_at=? where id=?`,
       [...vals, c.id],
     );
     return c.id;
@@ -90,7 +99,8 @@ export function saveContract(b: Book, c: ContractInput): string {
   const id = uid();
   b.run(
     `insert into recurring (name, payee, person, purpose, kind, category_id, account_id, amount, interval, due_day, due_months,
-      payment_method, note, start_date, end_date, status, updated_at, id, created_at) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      payment_method, note, start_date, end_date, notice_period, doc_ref, advisor, death_action, status, updated_at, id, created_at)
+      values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [...vals, id, t],
   );
   return id;
@@ -214,8 +224,7 @@ export function parseContractsCsv(b: Book, text: string): ImportRow[] {
   const res = Papa.parse<Record<string, string>>(text.replace(/^﻿/, ''), { header: true, skipEmptyLines: 'greedy', delimiter: '' });
   const cats = listCategories(b);
   const existing = listContracts(b, true);
-  const key = (n: string, p: string | null | undefined, z: string | null | undefined, a: number) => `${n}|${p ?? ''}|${z ?? ''}|${a}`.toLowerCase();
-  const seen = new Set(existing.map((c) => key(c.name, c.person, c.purpose, c.amount)));
+  const seen = new Set(existing.map((c) => contractKey(c.name, c.person, c.purpose, c.amount)));
   return res.data.map((row, i) => {
     const name = pick(row, 'name');
     const parsedAmount = parseAmount(pick(row, 'amount'));
@@ -235,9 +244,27 @@ export function parseContractsCsv(b: Book, text: string): ImportRow[] {
     else if (!amount) { out.skip = true; out.warning = 'Betrag fehlt oder ist 0'; }
     else if (!interval) out.warning = `Rhythmus „${pick(row, 'interval')}“ unbekannt, monatlich angenommen`;
     else if (categoryLabel && !cat) out.warning = `Kategorie „${categoryLabel}“ wird neu angelegt`;
-    if (!out.skip && seen.has(key(name, input.person, input.purpose, amount))) { out.skip = true; out.duplicate = true; out.warning = 'schon vorhanden'; }
+    if (!out.skip && seen.has(contractKey(name, input.person, input.purpose, amount))) { out.skip = true; out.duplicate = true; out.warning = 'schon vorhanden'; }
     return out;
   });
+}
+
+export function contractKey(name: string, person: string | null | undefined, purpose: string | null | undefined, amount: number) {
+  return `${name}|${person ?? ''}|${purpose ?? ''}|${amount}`.toLowerCase();
+}
+
+/** Kategorie per Bezeichnung finden oder anlegen ("Ober › Unter" legt beide Ebenen an). */
+export function resolveCategory(b: Book, label: string | null | undefined, kind: 'income' | 'expense'): string | null {
+  if (!label) return null;
+  const found = findCategory(listCategories(b), label);
+  if (found) return found.id;
+  const parts = label.split(/\s*(?:›|>|\/)\s*/).filter(Boolean);
+  let parent: string | null = null;
+  for (let k = 0; k < parts.length; k++) {
+    const hit = findCategory(listCategories(b), parts.slice(0, k + 1).join(' › '));
+    parent = hit ? hit.id : saveCategory(b, { name: parts[k], kind, parent_id: parent });
+  }
+  return parent;
 }
 
 /** Übernimmt die Zeilen; fehlende Kategorien werden angelegt ("Ober › Unter" legt beide Ebenen an). */
@@ -246,22 +273,7 @@ export function commitContracts(b: Book, rows: ImportRow[], accountId: string | 
   b.tx(() => {
     for (const r of rows) {
       if (r.skip) continue;
-      let categoryId = r.input.category_id ?? null;
-      if (!categoryId && r.categoryLabel) {
-        const found = findCategory(listCategories(b), r.categoryLabel);
-        if (found) categoryId = found.id;
-        else {
-          const parts = r.categoryLabel.split(/\s*(?:›|>|\/)\s*/).filter(Boolean);
-          const kind = r.input.amount > 0 ? 'income' : 'expense';
-          let parent: string | null = null;
-          for (let k = 0; k < parts.length; k++) {
-            const label: string = parts.slice(0, k + 1).join(' › ');
-            const hit = findCategory(listCategories(b), label);
-            parent = hit ? hit.id : saveCategory(b, { name: parts[k], kind, parent_id: parent });
-          }
-          categoryId = parent;
-        }
-      }
+      const categoryId = r.input.category_id ?? resolveCategory(b, r.categoryLabel, r.input.amount > 0 ? 'income' : 'expense');
       saveContract(b, { ...r.input, category_id: categoryId, account_id: r.input.account_id ?? accountId });
       n++;
     }

@@ -3,7 +3,7 @@ import schema from './schema.sql?raw';
 import { seedDefaults } from './seed';
 import { now } from '../lib/id';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /** Migrationen von Version n-1 auf n. Neue Bücher starten mit schema.sql (Version 1) und durchlaufen alle Migrationen. */
 const MIGRATIONS: Record<number, string> = {
@@ -20,11 +20,96 @@ const MIGRATIONS: Record<number, string> = {
     alter table recurring add column end_date text;
     create index idx_recurring_status on recurring(status);
   `,
+  3: `
+    create table accounts_new (
+      id text primary key,
+      name text not null check (length(name) between 1 and 80),
+      type text not null check (type in ('cash','checking','household','credit','savings','fixed','depot','loan')),
+      owner text,
+      bank text,
+      currency text not null default 'EUR',
+      opening_balance integer not null default 0,
+      iban text,
+      interest_rate real,
+      exemption integer,
+      exemption_used integer,
+      note text,
+      sort_order integer not null default 0,
+      archived integer not null default 0,
+      created_at text not null, updated_at text not null
+    );
+    insert into accounts_new (id, name, type, owner, currency, opening_balance, iban, sort_order, archived, created_at, updated_at)
+      select id, name, type, owner, currency, opening_balance, iban, sort_order, archived, created_at, updated_at from accounts;
+    drop table accounts;
+    alter table accounts_new rename to accounts;
+
+    create table balance_snapshots (
+      id text primary key,
+      account_id text not null references accounts(id) on delete cascade,
+      date text not null,
+      balance integer not null,
+      note text,
+      unique (account_id, date)
+    );
+
+    create table holdings (
+      id text primary key,
+      account_id text references accounts(id) on delete set null,
+      owner text,
+      wkn text,
+      isin text,
+      name text not null,
+      quantity real not null default 0,
+      cost_value integer,
+      price integer,
+      market_value integer,
+      as_of text,
+      created_at text not null, updated_at text not null
+    );
+    create index idx_holdings_account on holdings(account_id);
+
+    create table pensions (
+      id text primary key,
+      person text,
+      provider text not null,
+      contribution integer,
+      interval text,
+      lump_sum integer,
+      monthly_pension integer,
+      projection1 integer,
+      projection2 integer,
+      projection3 integer,
+      start_text text,
+      as_of text,
+      advisor text,
+      death_action text,
+      note text,
+      created_at text not null, updated_at text not null
+    );
+
+    alter table recurring add column notice_period text;
+    alter table recurring add column doc_ref text;
+    alter table recurring add column advisor text;
+    alter table recurring add column death_action text;
+  `,
 };
 
 function migrate(book: Book, from: number) {
   for (let v = from + 1; v <= SCHEMA_VERSION; v++) {
-    book.db.exec(MIGRATIONS[v]);
+    // Tabellen-Neuaufbau braucht ausgeschaltete Fremdschlüssel, sonst würden abhängige Buchungen gelöscht
+    book.db.run('PRAGMA foreign_keys = OFF');
+    try {
+      book.db.exec('BEGIN');
+      book.db.exec(MIGRATIONS[v]);
+      const bad = book.db.exec('PRAGMA foreign_key_check');
+      if (bad.length) throw new Error('Migration verletzt Fremdschlüssel');
+      book.db.exec('COMMIT');
+    } catch (e) {
+      book.db.exec('ROLLBACK');
+      throw e;
+    } finally {
+      book.db.run('PRAGMA foreign_keys = ON');
+    }
     book.db.run("insert into meta(key, value) values ('schema_version', ?) on conflict(key) do update set value = excluded.value", [String(v)]);
   }
 }

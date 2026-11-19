@@ -24,6 +24,11 @@ npm run build      # statischer Build in dist/
 - Übersicht: Monatsrest mit Hochrechnung, Konten, Budgets, Saldenverlauf, Kategorien, Sparpotenzial
 - Auswertungen: Monat, Jahr, Monatsvergleich, Langzeit
 - Verträge & Fixkosten: Rhythmus, Fälligkeit, Person, Ø pro Monat, CSV-Import (Spalten wie Vertrag; Vertragspartner; Zweck; Betrag; Rhythmus; Fälligkeit; Zahlart; Art; Kategorie; Bemerkung)
+- Konten nach Person mit Bank, Zinssatz und Freistellungsauftrag; Kontoarten auch Depot, Festgeld, Kredit
+- Kontostände zu Stichtagen (für Depots und Konten ohne Einzelbuchungen) und Vermögensverlauf
+- Vermögen: Depotpositionen mit Einstand, Kurswert und Gewinn
+- Vorsorge: Renten und Versicherungen mit Einmalbetrag, Monatsrente und Hochrechnungen
+- Gesamtimport (Einstellungen → Daten importieren) im Format `haushaltskompass-import` (JSON, siehe `src/db/importer.ts`)
 - Sicherung und Wiederherstellung als Datei, CSV-Export
 
 ## Aufbau

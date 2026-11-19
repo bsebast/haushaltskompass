@@ -1,11 +1,14 @@
-export type AccountType = 'cash' | 'checking' | 'household' | 'credit' | 'savings';
+export type AccountType = 'cash' | 'checking' | 'household' | 'credit' | 'savings' | 'fixed' | 'depot' | 'loan';
 
 export const ACCOUNT_TYPES: Record<AccountType, string> = {
   checking: 'Girokonto',
   cash: 'Bargeld',
   household: 'Haushaltskasse',
   credit: 'Kreditkarte',
-  savings: 'Sparkonto',
+  savings: 'Sparkonto / Tagesgeld',
+  fixed: 'Festgeld',
+  depot: 'Depot',
+  loan: 'Kredit / Darlehen',
 };
 
 export interface Account {
@@ -16,9 +19,56 @@ export interface Account {
   currency: string;
   opening_balance: number;
   iban: string | null;
+  bank: string | null;
+  interest_rate: number | null;
+  exemption: number | null;
+  exemption_used: number | null;
+  note: string | null;
   sort_order: number;
   archived: number;
   balance: number;
+  /** Datum des letzten erfassten Kontostands, falls vorhanden */
+  balance_date: string | null;
+}
+
+export interface Snapshot {
+  id: string;
+  account_id: string;
+  date: string;
+  balance: number;
+  note: string | null;
+}
+
+export interface Holding {
+  id: string;
+  account_id: string | null;
+  owner: string | null;
+  wkn: string | null;
+  isin: string | null;
+  name: string;
+  quantity: number;
+  cost_value: number | null;
+  price: number | null;
+  market_value: number | null;
+  as_of: string | null;
+}
+
+export interface Pension {
+  id: string;
+  person: string | null;
+  provider: string;
+  contribution: number | null;
+  interval: string | null;
+  lump_sum: number | null;
+  monthly_pension: number | null;
+  projection1: number | null;
+  projection2: number | null;
+  projection3: number | null;
+  start_text: string | null;
+  as_of: string | null;
+  advisor: string | null;
+  death_action: string | null;
+  note: string | null;
 }
 
 export interface Category {

@@ -89,29 +89,35 @@ export function categoryTotals(
     .sort((a, b) => b.amount - a.amount);
 }
 
-/** Kontostand am Monatsende je Monat (alle Konten oder eines). */
-export function balanceTrend(b: Book, fromMonth: string, toMonth: string, accountId?: string | null): { month: string; balance: number }[] {
-  const opening = (b.value<number>(
-    `select coalesce(sum(opening_balance), 0) from accounts ${accountId ? 'where id = ?' : 'where archived = 0'}`,
-    accountId ? [accountId] : [],
-  ) ?? 0) as number;
-  const accFilter = accountId ? 'account_id = ?' : 'account_id in (select id from accounts where archived = 0)';
-  const before = (b.value<number>(
-    `select coalesce(sum(amount), 0) from transactions where date < ? and ${accFilter}`,
-    accountId ? [`${fromMonth}-01`, accountId] : [`${fromMonth}-01`],
-  ) ?? 0) as number;
-  const rows = b.all<{ month: string; s: number }>(
-    `select substr(date,1,7) as month, sum(amount) as s from transactions where substr(date,1,7) between ? and ? and ${accFilter} group by month`,
-    accountId ? [fromMonth, toMonth, accountId] : [fromMonth, toMonth],
-  );
-  const map = new Map(rows.map((r) => [r.month, r.s]));
-  let bal = opening + before;
-  const out: { month: string; balance: number }[] = [];
-  for (let m = fromMonth; m <= toMonth; m = addMonths(m, 1)) {
-    bal += map.get(m) ?? 0;
-    out.push({ month: m, balance: bal });
+/** Kontostand je Konto zu einem Stichtag (letzter Snapshot ≤ Stichtag + Buchungen danach, sonst Anfangssaldo + Buchungen). */
+export function balancesAt(b: Book, dates: string[], accountIds?: string[]): Map<string, number[]> {
+  // archivierte Konten zählen mit: ihr Verlauf gehört zur Vermögensentwicklung, heute stehen sie meist auf 0
+  const accts = b.all<{ id: string; opening_balance: number }>('select id, opening_balance from accounts')
+    .filter((a) => !accountIds || accountIds.includes(a.id));
+  const snaps = b.all<{ account_id: string; date: string; balance: number }>('select account_id, date, balance from balance_snapshots order by date');
+  const tx = b.all<{ account_id: string; date: string; s: number }>('select account_id, date, sum(amount) as s from transactions group by account_id, date order by date');
+  const out = new Map<string, number[]>();
+  for (const a of accts) {
+    const sn = snaps.filter((x) => x.account_id === a.id);
+    const tt = tx.filter((x) => x.account_id === a.id);
+    out.set(a.id, dates.map((d) => {
+      const anchor = [...sn].reverse().find((x) => x.date <= d);
+      if (anchor) return anchor.balance + tt.filter((x) => x.date > anchor.date && x.date <= d).reduce((s, x) => s + x.s, 0);
+      // vor dem ersten erfassten Kontostand gibt es nur dann Werte, wenn es keine Snapshots gibt
+      if (sn.length) return 0;
+      return a.opening_balance + tt.filter((x) => x.date <= d).reduce((s, x) => s + x.s, 0);
+    }));
   }
   return out;
+}
+
+/** Kontostand am Monatsende je Monat (alle aktiven Konten oder eines). */
+export function balanceTrend(b: Book, fromMonth: string, toMonth: string, accountId?: string | null): { month: string; balance: number }[] {
+  const months: string[] = [];
+  for (let m = fromMonth; m <= toMonth; m = addMonths(m, 1)) months.push(m);
+  const ends = months.map((m) => monthRange(m).to);
+  const per = balancesAt(b, ends, accountId ? [accountId] : undefined);
+  return months.map((month, i) => ({ month, balance: [...per.values()].reduce((s, arr) => s + arr[i], 0) }));
 }
 
 export interface MonthLeft {
