@@ -396,6 +396,15 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
     const c = findCategoryByLabel(cats, path);
     if (c) bankCats.set(k, c.id);
   }
+  // Zinsen und Steuern erkennt man sicher am Buchungstext der Bank, unabhängig von Regeln, die für Gebühren gedacht sind
+  const interestCat = findCategoryByLabel(cats, 'Zinsen & Dividenden')?.id ?? null;
+  const taxCat = findCategoryByLabel(cats, 'Finanzen › Steuern')?.id ?? null;
+  const bookedCategory = (r: BankRow): string | null => {
+    const text = `${r.bookingText} ${r.purpose}`;
+    if (/^\s*(kapitalertrag(s)?steuer|solidaritätszuschlag|solidaritaetszuschlag|kirchensteuer)\b/i.test(r.bookingText) || /steuererstattung (kap|sol|kirch)/i.test(text)) return taxCat;
+    if (r.amount > 0 && /^\s*(abschluss|zinsen|habenzins)/i.test(r.bookingText)) return interestCat;
+    return null;
+  };
   const existing = accountId
     ? b.all<{ id: string; date: string; amount: number; payee: string | null; import_hash: string | null }>(
       'select id, date, amount, payee, import_hash from transactions where account_id = ? and date between date(?, \'-3 days\') and date(?, \'+3 days\')',
@@ -460,7 +469,7 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
     const contract = transfer ? null : matchContract(contracts, r, accountId);
     // Reihenfolge: eigene Regeln, dann Kategorie des Vertrags, dann Vorschlagsregeln
     const input = { payee: r.payee, purpose: `${r.purpose} ${r.bookingText}` };
-    let categoryId = findCategory(rules, input);
+    let categoryId = bookedCategory(r) ?? findCategory(rules, input);
     let categorySource: PlannedRow['categorySource'] = categoryId ? 'rule' : null;
     if (!categoryId && contract?.category_id) { categoryId = contract.category_id; categorySource = 'contract'; }
     if (!categoryId && r.bankCategory) { categoryId = bankCats.get(r.bankCategory) ?? null; categorySource = categoryId ? 'rule' : null; }

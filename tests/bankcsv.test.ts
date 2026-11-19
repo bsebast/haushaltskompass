@@ -208,4 +208,21 @@ describe('comdirect-Import', () => {
     expect(suggestAccount(b, st)).toBe(res.accountId);
     expect(commitBankImport(b, st, { accountId: res.accountId }).imported).toBe(0);
   });
+
+  it('ordnet Zinsabschluss und Kapitalertragsteuer am Buchungstext zu, auch gegen eine Gebührenregel', async () => {
+    const b = await newBook();
+    const cat = (n: string) => listCategories(b).find((c) => c.name === n)!.id;
+    const tg = saveAccount(b, { name: 'Tagesgeld', type: 'savings', bank: 'Musterbank' });
+    const r = (date: string, text: string, purpose: string, amount: string, saldo: string) =>
+      `Tagesgeld;DE00123456780000000002;BIC;Musterbank;${date};${date};;;;${text};${purpose};${amount};EUR;${saldo};;;;`;
+    const csv = [HEAD,
+      r('02.02.2026', 'Kapitalertragsteuer', 'Steuererstattung Kap.Steuer', '1,00', '1.010,00'),
+      r('30.01.2026', 'Kapitalertragsteuer', 'Kapitalertragsteuer aus Habenzins', '-1,00', '1.009,00'),
+      r('30.01.2026', 'Abschluss', 'Abschluss per 31.01.2026', '10,00', '1.010,00'),
+    ].join('\r\n');
+    const { saveRule } = await import('../src/db/repo');
+    saveRule(b, { field: 'any', op: 'contains', value: 'abschluss', category_id: cat('Bankgebühren') } as never);
+    const plan = planBankImport(b, parseBankCsv(csv), tg);
+    expect(plan.rows.map((x) => x.categoryId)).toEqual([cat('Zinsen & Dividenden'), cat('Steuern'), cat('Steuern')]);
+  });
 });
