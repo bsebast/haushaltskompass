@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Search, Paperclip, Split, ArrowLeftRight, Download, Upload } from 'lucide-react';
+import { Search, Paperclip, Split, ArrowLeftRight, Download, Upload, Landmark } from 'lucide-react';
 import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Empty, Dot } from '../components/ui';
 import CategorySelect from '../components/CategorySelect';
@@ -9,6 +9,7 @@ import { listAccounts, listTransactions, listCategories, descendantIds, setCateg
 import { formatDate, monthRange, currentMonth, addMonths } from '../lib/dates';
 import { exportCsv } from '../lib/csvExport';
 import BankImportDialog from '../components/BankImportDialog';
+import BankFetchDialog from '../components/BankFetchDialog';
 
 type Period = 'month' | 'last' | '3m' | 'year' | 'all';
 const PERIODS: [Period, string][] = [['month', 'Dieser Monat'], ['last', 'Letzter Monat'], ['3m', '3 Monate'], ['year', 'Dieses Jahr'], ['all', 'Alles']];
@@ -33,6 +34,7 @@ export default function Transactions() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { openNew, openEdit } = useTxDialog();
   const [importing, setImporting] = useState(false);
+  const [fetching, setFetching] = useState(false);
 
   const accounts = useQuery((b) => listAccounts(b, true));
   const cats = useQuery(listCategories);
@@ -57,12 +59,14 @@ export default function Transactions() {
     <>
       <PageHeader title="Buchungen" subtitle={`${rows.length} Buchungen · Summe`} actions={
         <>
+          <button className="btn-secondary" onClick={() => setFetching(true)} title="Umsätze per FinTS direkt von der Bank abrufen"><Landmark size={16} />Bankabruf</button>
           <button className="btn-secondary" onClick={() => setImporting(true)}><Upload size={16} />Import</button>
           <button className="btn-secondary" onClick={() => exportCsv(rows)} disabled={!rows.length}><Download size={16} />CSV</button>
           <button className="btn-secondary" onClick={() => openNew('transfer', accountId)}><ArrowLeftRight size={16} />Umbuchung</button>
         </>
       } />
       {importing && <BankImportDialog onClose={() => setImporting(false)} />}
+      {fetching && <BankFetchDialog onClose={() => setFetching(false)} />}
       <div className="card p-3 mb-4 grid gap-2 md:grid-cols-[1fr_180px_180px_160px]">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" aria-hidden />

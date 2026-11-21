@@ -7,6 +7,10 @@ import { listContracts, findCategoryByLabel, type Contract } from './contracts';
 import { parseAmount } from '../lib/money';
 import { uid } from '../lib/id';
 
+/** Fingerabdrücke von Buchungen, die per FinTS direkt von der Bank abgerufen wurden */
+export const FINTS_HASH_PREFIX = 'bank:fints:';
+export const isFintsHash = (h: string | null | undefined) => !!h && h.startsWith(FINTS_HASH_PREFIX);
+
 /**
  * Import von Kontoumsätzen aus CSV-Exporten deutscher Banken.
  * Getestet mit dem Export der Volksbanken/Raiffeisenbanken (Spalten „Buchungstag“, „Name Zahlungsbeteiligter“,
@@ -53,6 +57,8 @@ export interface BankStatement {
   holder: string | null;
   /** Referenzkonto, von dem die Kartenabrechnung eingezogen wird */
   refIban: string | null;
+  /** 'fints' bei Umsätzen, die direkt von der Bank abgerufen wurden; sonst Dateiimport */
+  source?: 'file' | 'fints';
 }
 
 const ALIASES: Record<string, string[]> = {
@@ -98,7 +104,7 @@ export function cleanPurpose(raw: string): string {
 }
 
 /** Bei PayPal, Klarna & Co. steht der eigentliche Händler im Verwendungszweck. */
-function realPayee(payee: string, purpose: string): string {
+export function realPayee(payee: string, purpose: string): string {
   if (/^paypal/i.test(payee)) {
     const m = /Ihr Einkauf bei ([^,]+)/i.exec(purpose) ?? /^[^ ]*\/\. ([^,]+),/.exec(purpose);
     if (m) return `${m[1].trim()} (PayPal)`;
@@ -427,6 +433,11 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
       [accountId, st.from, st.to])
     : [];
   const hashes = new Set(existing.map((t) => t.import_hash).filter(Boolean));
+  // Dieselbe Buchung kann schon aus der jeweils anderen Quelle stammen (Datei bzw. FinTS-Abruf).
+  // Die Texte unterscheiden sich dann, Buchungstag und Betrag nicht: das zählt als schon importiert.
+  const fints = st.source === 'fints';
+  const otherSource = existing.filter((t) => t.import_hash?.startsWith('bank:') && isFintsHash(t.import_hash) !== fints);
+  const usedOther = new Set<string>();
   const autos = accountId
     ? b.all<{ id: string; date: string; amount: number; payee: string | null }>(
       `select id, date, amount, payee from transactions where account_id = ? and auto_counterpart = 1
@@ -475,9 +486,12 @@ export function planBankImport(b: Book, st: BankStatement, accountId: string | n
   const rows: PlannedRow[] = st.rows.map((r) => {
     let status: RowStatus = 'new';
     let match: PlannedRow['match'] = null;
-    const auto = hashes.has(r.hash) ? undefined
+    const other = hashes.has(r.hash) ? undefined
+      : otherSource.filter((t) => !usedOther.has(t.id) && t.amount === r.amount && dayDiff(t.date, r.date) <= 1).sort((x, y) => dayDiff(x.date, r.date) - dayDiff(y.date, r.date))[0];
+    const auto = hashes.has(r.hash) || other ? undefined
       : autos.filter((t) => !usedAuto.has(t.id) && t.amount === r.amount && dayDiff(t.date, r.date) <= 4).sort((x, y) => dayDiff(x.date, r.date) - dayDiff(y.date, r.date))[0];
     if (hashes.has(r.hash)) status = 'duplicate';
+    else if (other) { usedOther.add(other.id); status = 'duplicate'; match = { id: other.id, date: other.date, payee: other.payee }; }
     else if (auto) { usedAuto.add(auto.id); status = 'replace'; match = { id: auto.id, date: auto.date, payee: auto.payee }; }
     else {
       const m = loose.find((t) => !used.has(t.id) && t.amount === r.amount && dayDiff(t.date, r.date) <= 3);

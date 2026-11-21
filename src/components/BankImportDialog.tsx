@@ -11,17 +11,21 @@ import { isXlsx, xlsxToCsv } from '../lib/xlsx';
 
 const NEW = '__new__';
 
-/** Kontoumsätze aus dem CSV-Export der Bank übernehmen (Vorschau, dann Import). */
-export default function BankImportDialog({ onClose }: { onClose: () => void }) {
+/**
+ * Kontoumsätze aus dem CSV-Export der Bank übernehmen (Vorschau, dann Import).
+ * Mit `statement` zeigt der Dialog direkt die Vorschau für Umsätze, die per FinTS abgerufen wurden.
+ */
+export default function BankImportDialog({ onClose: close, statement }: { onClose: (imported: boolean) => void; statement?: BankStatement }) {
   const book = useBook();
   const accounts = useQuery((b) => listAccounts(b, true));
   const cats = useQuery(listCategories);
-  const [st, setSt] = useState<BankStatement | null>(null);
-  const [account, setAccount] = useState('');
+  const [st, setSt] = useState<BankStatement | null>(statement ?? null);
+  const [account, setAccount] = useState(() => (statement ? suggestAccount(book, statement) ?? NEW : ''));
   const [useSuggestions, setUseSuggestions] = useState(true);
   const [includePossible, setIncludePossible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<BankCommitResult | null>(null);
+  const onClose = () => close(!!done);
 
   const extra = useMemo(() => (useSuggestions ? pendingSuggestedRules(book) : []), [book, useSuggestions, st]);
   const plan = useMemo(() => (st ? planBankImport(book, st, account && account !== NEW ? account : null, extra) : null), [book, st, account, extra]);
@@ -59,7 +63,7 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
   const target = accounts.find((a) => a.id === account);
 
   return (
-    <Modal title="Kontoumsätze importieren" onClose={onClose} wide footer={
+    <Modal title={statement ? 'Abgerufene Umsätze übernehmen' : 'Kontoumsätze importieren'} onClose={onClose} wide footer={
       done ? <button className="btn-primary" onClick={onClose}>Fertig</button> : (
         <>
           <button className="btn-secondary" onClick={onClose}>Abbrechen</button>
@@ -77,14 +81,14 @@ export default function BankImportDialog({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <div className="space-y-3 text-sm">
-          <p className="text-text-muted">CSV-Export der Umsätze aus dem Online-Banking, z. B. bei Volksbanken unter Umsätze → Export → CSV, bei der comdirect unter Umsätze → Export als CSV. Kreditkarten-Umsätze können auch als Excel-Datei (.xls oder .xlsx) eingelesen werden. Bereits importierte Buchungen werden erkannt und nicht doppelt übernommen.</p>
-          <Field label="Datei"><input type="file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="input py-1" onChange={(e) => read(e.target.files?.[0])} /></Field>
+          {!statement && <p className="text-text-muted">CSV-Export der Umsätze aus dem Online-Banking, z. B. bei Volksbanken unter Umsätze → Export → CSV, bei der comdirect unter Umsätze → Export als CSV. Kreditkarten-Umsätze können auch als Excel-Datei (.xls oder .xlsx) eingelesen werden. Bereits importierte Buchungen werden erkannt und nicht doppelt übernommen.</p>}
+          {!statement && <Field label="Datei"><input type="file" accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="input py-1" onChange={(e) => read(e.target.files?.[0])} /></Field>}
           {st && plan && (
             <>
               <div className="rounded-md bg-surface-2 p-3 grid sm:grid-cols-2 gap-x-4 gap-y-1">
-                <div>Konto laut Datei: <strong>{st.accountName ?? '–'}</strong>{st.iban && <span className="text-text-muted"> · …{st.iban.slice(-4)}</span>}</div>
+                <div>Konto laut {statement ? 'Bank' : 'Datei'}: <strong>{st.accountName ?? '–'}</strong>{st.iban && <span className="text-text-muted"> · …{st.iban.slice(-4)}</span>}</div>
                 <div>Zeitraum: <strong>{formatDate(st.from)} – {formatDate(st.to)}</strong></div>
-                <div>Buchungen in der Datei: <strong>{st.rows.length}</strong></div>
+                <div>Buchungen {statement ? 'abgerufen' : 'in der Datei'}: <strong>{st.rows.length}</strong></div>
                 {st.endBalance != null && <div>Endsaldo: <strong><Money cents={st.endBalance} colored={false} /></strong></div>}
               </div>
               <Field label="In welches Konto?" hint={target?.iban ? undefined : st.iban ? 'Die IBAN wird beim Konto gespeichert, damit es beim nächsten Import automatisch erkannt wird.' : undefined}>

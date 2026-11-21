@@ -30,6 +30,16 @@ npm run build      # statischer Build in dist/
 - Vorsorge: Renten und Versicherungen mit Einmalbetrag, Monatsrente und Hochrechnungen
 - Gesamtimport (Einstellungen → Daten importieren) im Format `haushaltskompass-import` (JSON, siehe `src/db/importer.ts`)
 - Sicherung und Wiederherstellung als Datei, CSV-Export
+- Bankabruf per FinTS (Buchungen → Bankabruf), siehe unten
+
+## Bankabruf per FinTS
+
+Mit „Bankabruf“ holt die App gebuchte Umsätze direkt von der Bank, voreingestellt sind Volksbanken/Raiffeisenbanken (Atruvia), comdirect und ING. Weitere FinTS-Banken lassen sich unter „Andere Bank“ mit BLZ und FinTS-Adresse eintragen. Die Umsätze laufen durch dieselbe Vorschau wie der Dateiimport: Dubletten werden erkannt (auch gegenüber früheren Dateiimporten, über Buchungstag und Betrag), Regeln und Verträge vergeben Kategorien, Umbuchungen bekommen ihre Gegenbuchung.
+
+- Der FinTS-Dialog läuft in einem kleinen Dienst im Dev-Server (`vite-plugin-fints.ts`, Bibliothek `lib-fints`), weil Browser Bankserver nicht direkt ansprechen dürfen. Er läuft also nur mit `npm run dev`.
+- Voraussetzung ist eine FinTS-Produktnummer der Deutschen Kreditwirtschaft (kostenlose Registrierung unter fints.org → Hersteller → Produktregistrierung). Sie wird beim ersten Bankabruf in der App eingegeben und in `privat/fints/fints.json` gespeichert, alternativ über die Umgebungsvariable `HK_FINTS_PRODUKT_ID`.
+- PIN und TAN werden nur für die laufende Verbindung im Speicher gehalten und nie gespeichert oder protokolliert. In `privat/fints/` (nicht im Git) liegen nur die Bankparameter mit der Kundensystem-ID und auf Wunsch der Anmeldename.
+- TAN-Verfahren mit Freigabe in der App (SecureGo plus, photoTAN-Push, ING-App) werden automatisch abgefragt; TAN-Eingabe und photoTAN-Grafik werden ebenfalls unterstützt, chipTAN optisch nicht.
 
 ## Aufbau
 

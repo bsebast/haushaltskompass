@@ -11,6 +11,7 @@
     "typecheck": "tsc -b"
   },
   "dependencies": {
+    "lib-fints": "1.5.3",
     "lucide-react": "^0.460.0",
     "papaparse": "5.7.1",
     "react": "18.3.1",
