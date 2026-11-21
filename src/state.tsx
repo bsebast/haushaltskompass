@@ -3,6 +3,7 @@ import initSqlJs, { type SqlJsStatic } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { Book, createBook, openBook } from './db/core';
 import { loadFile, saveFile, deleteFile, requestPersistence } from './db/storage';
+import { fetchNewBackup, IMPORT_MARKER, keepCurrent, markImported, withImportLock } from './db/autoImport';
 
 type Status = 'loading' | 'empty' | 'ready' | 'error';
 
@@ -18,6 +19,25 @@ interface Ctx {
 
 const BookContext = createContext<Ctx | null>(null);
 
+/** Spielt eine neue Sicherung ein. Der bisherige Stand wird vorher in privat/vor-import/ abgelegt. */
+function importNewest(sql: SqlJsStatic, current: () => Promise<Uint8Array | null>): Promise<Book | null> {
+  return withImportLock(async () => {
+    const incoming = await fetchNewBackup();
+    if (!incoming) return null;
+    const next = openBook(sql, incoming.data);
+    try {
+      const before = await current();
+      if (before) await keepCurrent(before);
+      await saveFile(next.export());
+      markImported(incoming.sha256);
+      return next;
+    } catch (e) {
+      next.close();
+      throw e;
+    }
+  });
+}
+
 export function BookProvider({ children }: { children: React.ReactNode }) {
   const [SQL, setSQL] = useState<SqlJsStatic | null>(null);
   const [book, setBook] = useState<Book | null>(null);
@@ -31,6 +51,17 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
       try {
         const sql = await initSqlJs({ locateFile: () => wasmUrl });
         setSQL(sql);
+        if (import.meta.env.DEV) {
+          const imported = await importNewest(sql, loadFile).catch((e) => {
+            console.error('Sicherung nicht eingespielt:', e);
+            return null;
+          });
+          if (imported) {
+            setBook(imported);
+            setStatus('ready');
+            return;
+          }
+        }
         const data = await loadFile();
         if (data) {
           setBook(openBook(sql, data));
@@ -71,6 +102,36 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('beforeunload', flush);
     };
   }, [book]);
+
+  // Neue Sicherung in privat/ sofort übernehmen, auch in weiteren offenen Tabs
+  useEffect(() => {
+    if (!import.meta.env.DEV || !SQL) return;
+    const swap = (next: Book) => {
+      window.clearTimeout(timer.current);
+      timer.current = undefined;
+      setSaving(false);
+      book?.close();
+      setBook(next);
+      setStatus('ready');
+    };
+    const onBackup = () => {
+      importNewest(SQL, async () => book?.export() ?? null)
+        .then((next) => next && swap(next))
+        .catch((e) => console.error('Sicherung nicht eingespielt:', e));
+    };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== IMPORT_MARKER) return;
+      loadFile()
+        .then((data) => data && swap(openBook(SQL, data)))
+        .catch((err) => console.error('Sicherung nicht übernommen:', err));
+    };
+    import.meta.hot?.on('hk:backup', onBackup);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      import.meta.hot?.off('hk:backup', onBackup);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [SQL, book]);
 
   const create = useCallback(
     (name: string, owner?: string) => {

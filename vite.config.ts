@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { backupImport } from './vite-plugin-backup';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), backupImport()],
   base: './',
   // sql.js ist ein CommonJS/UMD-Paket. Es muss vorgebündelt werden,
   // sonst fehlt im Dev-Server der Default-Export und die Seite bleibt weiß.
