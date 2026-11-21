@@ -55,13 +55,16 @@ export function categoryTotals(
   from: string,
   to: string,
   kind: 'expense' | 'income',
-  opts: { rollUp?: boolean; parentId?: string | null } = {},
+  opts: { rollUp?: boolean; parentId?: string | null; excludeExternal?: boolean } = {},
 ): CategoryTotal[] {
   const cats = listCategories(b);
   const byId = new Map(cats.map((c) => [c.id, c]));
   const roots = rootOf(cats);
   const rows = b.all<{ category_id: string | null; amount: number }>(
-    `${LINES} select category_id, sum(amount) as amount from lines where date between ? and ? and amount ${kind === 'expense' ? '<' : '>'} 0 group by category_id`,
+    `${LINES} select category_id, sum(amount) as amount from lines
+     where date between ? and ? and amount ${kind === 'expense' ? '<' : '>'} 0
+     ${opts.excludeExternal ? 'and account_id not in (select id from accounts where external = 1)' : ''}
+     group by category_id`,
     [from, to],
   );
   const agg = new Map<string | null, number>();

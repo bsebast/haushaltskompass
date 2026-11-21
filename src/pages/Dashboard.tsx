@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '../state';
 import { Money, Bar, Dot, Empty } from '../components/ui';
 import { BalanceChart, DonutChart, IncomeExpenseChart } from '../components/charts';
-import { listAccounts, listTransactions } from '../db/repo';
+import type { CategoryTotal } from '../db/reports';
+import type { Book } from '../db/core';
+import { listAccounts, listTransactions, listCategories } from '../db/repo';
 import { monthLeft, balanceTrend, budgetStatus, categoryTotals, monthlyTotals, savingHints } from '../db/reports';
 import { currentMonth, addMonths, monthRange, monthLabel, formatDate } from '../lib/dates';
 import { ACCOUNT_TYPES } from '../db/types';
@@ -23,15 +26,97 @@ function Card({ title, link, children, className = '' }: { title: string; link?:
   );
 }
 
+type Span = 'month' | 'year';
+
+/** Sammelposten für Gutschriften auf Ausgabe-Kategorien (Rückzahlungen, Gutschriften vom Händler usw.). */
+const REFUNDS = '__rueckfluesse';
+
+function expenseRootIds(b: Book): Set<string> {
+  return new Set(listCategories(b).filter((c) => !c.parent_id && c.kind === 'expense').map((c) => c.id));
+}
+
+/**
+ * Einnahmen nach Hauptkategorie. Umbuchungen und neutrale externe Konten zählen nicht.
+ * Gutschriften auf Ausgabe-Kategorien werden zu einem Posten „Rückflüsse aus Ausgaben“ zusammengefasst.
+ */
+function incomeComposition(b: Book, from: string, to: string): CategoryTotal[] {
+  const rows = categoryTotals(b, from, to, 'income', { excludeExternal: true });
+  const exp = expenseRootIds(b);
+  const out = rows.filter((r) => !r.category_id || !exp.has(r.category_id));
+  const refunds = rows.filter((r) => r.category_id && exp.has(r.category_id)).reduce((a, r) => a + r.amount, 0);
+  if (refunds) out.push({ category_id: REFUNDS, name: 'Rückflüsse aus Ausgaben', color: '#b9a27a', amount: refunds, share: 0 });
+  const total = out.reduce((a, r) => a + r.amount, 0) || 1;
+  return out.map((r) => ({ ...r, share: r.amount / total })).sort((a, b) => b.amount - a.amount);
+}
+
+/** Zeitraum der Kategorie-Karten: laufender Monat oder Jahr bis heute. */
+function spanRange(span: Span, month: string): { from: string; to: string; label: string } {
+  if (span === 'month') return { ...monthRange(month), label: monthLabel(month, true) };
+  const y = month.slice(0, 4);
+  return { from: `${y}-01-01`, to: monthRange(month).to, label: `Jahr ${y}` };
+}
+
+function SpanToggle({ value, onChange }: { value: Span; onChange: (s: Span) => void }) {
+  return (
+    <div className="inline-flex rounded-md border border-border text-xs overflow-hidden" role="group" aria-label="Zeitraum">
+      {(['month', 'year'] as const).map((s) => (
+        <button key={s} type="button" onClick={() => onChange(s)} aria-pressed={value === s}
+          className={`px-2 py-0.5 ${value === s ? 'bg-accent text-white' : 'text-text-muted hover:text-text'}`}>
+          {s === 'month' ? 'Monat' : 'Jahr'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Kreisdiagramm mit Top-Liste für Ausgaben oder Einnahmen nach (Haupt-)Kategorie; Klick öffnet die Buchungen. */
+function CategoryCard({ kind, data, span, onSpan, onPick }: {
+  kind: 'income' | 'expense'; data: CategoryTotal[]; span: Span; onSpan: (s: Span) => void; onPick: (c: CategoryTotal) => void;
+}) {
+  const none = kind === 'income' ? 'Einnahmen' : 'Ausgaben';
+  return (
+    <section className="card p-4">
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <h2 className="text-sm font-semibold">{none} nach Kategorie</h2>
+        <div className="flex items-center gap-2">
+          <SpanToggle value={span} onChange={onSpan} />
+          <Link to="/auswertungen" className="text-xs text-accent hover:underline">Details</Link>
+        </div>
+      </div>
+      {data.length === 0 ? <p className="text-sm text-text-muted">{span === 'month' ? 'Diesen Monat' : 'Dieses Jahr'} noch keine {none}.</p> : (
+        <>
+          <DonutChart data={data.slice(0, 8)} height={160} onPick={onPick} />
+          <ul className="mt-2 space-y-1 text-sm">
+            {data.slice(0, 5).map((c) => (
+              <li key={c.category_id ?? 'none'} className="flex items-center gap-2">
+                <Dot color={c.color} /><span className="flex-1 truncate"><DrillCell onClick={() => onPick(c)}>{c.name}</DrillCell></span>
+                <span className="text-text-muted text-xs">{Math.round(c.share * 100)} %</span>
+                <Money cents={c.amount} colored={false} />
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-between border-t border-border mt-2 pt-1.5 text-sm font-semibold">
+            <span>Summe</span><Money cents={data.reduce((a, c) => a + c.amount, 0)} colored={false} />
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const m = currentMonth();
-  const r = monthRange(m);
   const left = useQuery((b) => monthLeft(b, m), [m]);
   const accounts = useQuery((b) => listAccounts(b));
   const trend = useQuery((b) => balanceTrend(b, addMonths(m, -11), m), [m]);
   const totals = useQuery((b) => monthlyTotals(b, addMonths(m, -5), m), [m]);
   const budgets = useQuery((b) => budgetStatus(b, m), [m]);
-  const topCats = useQuery((b) => categoryTotals(b, r.from, r.to, 'expense'), [r.from]);
+  const [expSpan, setExpSpan] = useState<Span>('month');
+  const [incSpan, setIncSpan] = useState<Span>('month');
+  const expR = spanRange(expSpan, m);
+  const incR = spanRange(incSpan, m);
+  const topCats = useQuery((b) => categoryTotals(b, expR.from, expR.to, 'expense', { excludeExternal: true }), [expR.from, expR.to]);
+  const incomeCats = useQuery((b) => incomeComposition(b, incR.from, incR.to), [incR.from, incR.to]);
   const recent = useQuery((b) => listTransactions(b, { limit: 8 }));
   const hints = useQuery((b) => savingHints(b, m), [m]);
   const open = useQuery((b) => listTransactions(b, { uncategorized: true }).length);
@@ -44,6 +129,18 @@ export default function Dashboard() {
     drill({
       title: `${kind === 'income' ? 'Einnahmen' : 'Ausgaben'}${root ? ` · ${root.name}` : ''} · ${monthLabel(month, true)}`,
       load: (b) => partsFromLines(reportLines(b, mr).filter((l) => (kind === 'income') === (l.amount > 0) && (!root || l.root_id === root.id))),
+    });
+  };
+  /** Buchungen einer Kategorie im Zeitraum der Karte (ohne Umbuchungen und ohne neutrale externe Konten). */
+  const showCategory = (span: { from: string; to: string; label: string }, kind: 'income' | 'expense', c: CategoryTotal) => {
+    drill({
+      title: `${kind === 'income' ? 'Einnahmen' : 'Ausgaben'} · ${c.name} · ${span.label}`,
+      load: (b) => {
+        const ext = new Set(listAccounts(b, true).filter((a) => a.external).map((a) => a.id));
+        const refundRoots = c.category_id === REFUNDS ? expenseRootIds(b) : null;
+        const inRoot = (root: string | null) => (refundRoots ? !!root && refundRoots.has(root) : root === c.category_id);
+        return partsFromLines(reportLines(b, span).filter((l) => (kind === 'income') === (l.amount > 0) && inRoot(l.root_id) && !ext.has(l.account_id)));
+      },
     });
   };
   const showMoves = (month: string) => {
@@ -106,22 +203,9 @@ export default function Dashboard() {
         <BalanceChart data={trend} onPick={showMoves} />
       </Card>
 
-      <Card title="Ausgaben nach Kategorie" link={['/auswertungen', 'Details']}>
-        {topCats.length === 0 ? <p className="text-sm text-text-muted">Diesen Monat noch keine Ausgaben.</p> : (
-          <>
-            <DonutChart data={topCats.slice(0, 8)} height={160} onPick={(c) => showMonth(m, 'expense', { id: c.category_id, name: c.name })} />
-            <ul className="mt-2 space-y-1 text-sm">
-              {topCats.slice(0, 5).map((c) => (
-                <li key={c.category_id ?? 'none'} className="flex items-center gap-2">
-                  <Dot color={c.color} /><span className="flex-1 truncate"><DrillCell onClick={() => showMonth(m, 'expense', { id: c.category_id, name: c.name })}>{c.name}</DrillCell></span>
-                  <span className="text-text-muted text-xs">{Math.round(c.share * 100)} %</span>
-                  <Money cents={c.amount} colored={false} />
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </Card>
+      <CategoryCard kind="expense" data={topCats} span={expSpan} onSpan={setExpSpan} onPick={(c) => showCategory(expR, 'expense', c)} />
+
+      <CategoryCard kind="income" data={incomeCats} span={incSpan} onSpan={setIncSpan} onPick={(c) => showCategory(incR, 'income', c)} />
 
       <Card title="Einnahmen und Ausgaben" className="md:col-span-2">
         <IncomeExpenseChart data={totals} height={220} onPick={(month, k) => showMonth(month, k)} />

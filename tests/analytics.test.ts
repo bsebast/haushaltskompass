@@ -7,7 +7,7 @@ import {
   contractsPlanVsActual, wealthSeries, accountAudit, listViews, saveView, deleteView, periodLabel,
 } from '../src/db/analytics';
 import { ACCOUNT_TYPES } from '../src/db/types';
-import { balancesAt, netWorth } from '../src/db/reports';
+import { balancesAt, netWorth, categoryTotals } from '../src/db/reports';
 
 async function setup() {
   const b = await newBook();
@@ -161,5 +161,15 @@ describe('Detailansicht (Klick auf Werte)', () => {
     expect(periodBounds('2026-02')).toEqual({ from: '2026-02-01', to: '2026-02-28' });
     expect(periodBounds('2026-Q2')).toEqual({ from: '2026-04-01', to: '2026-06-30' });
     expect(periodBounds('2026')).toEqual({ from: '2026-01-01', to: '2026-12-31' });
+  });
+
+  it('Einnahmen nach Kategorie ohne Umbuchungen und ohne neutrale externe Konten', async () => {
+    const { b, cat } = await setup();
+    const ext = saveAccount(b, { name: 'Durchlauf', type: 'checking', external: true });
+    saveTransaction(b, { account_id: ext, date: '2026-01-20', amount: 99900, payee: 'Extern', category_id: cat('Sonstige Einnahmen'), autoCategorize: false });
+    const inc = categoryTotals(b, '2026-01-01', '2026-02-28', 'income', { excludeExternal: true });
+    expect(inc.map((c) => [c.name, c.amount])).toEqual([['Gehalt & Lohn', 320000]]);
+    expect(inc[0].share).toBe(1);
+    expect(categoryTotals(b, '2026-01-01', '2026-02-28', 'income')).toHaveLength(2);
   });
 });
