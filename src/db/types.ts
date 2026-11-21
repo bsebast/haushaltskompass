@@ -31,6 +31,9 @@ export interface Account {
   balance: number;
   /** Datum des letzten erfassten Kontostands, falls vorhanden */
   balance_date: string | null;
+  /** Warngrenzen für den Kontostand (Cent) */
+  min_balance?: number | null;
+  max_balance?: number | null;
 }
 
 export interface Snapshot {
@@ -53,6 +56,9 @@ export interface Holding {
   price: number | null;
   market_value: number | null;
   as_of: string | null;
+  /** Warngrenzen für den Kurs je Stück (Cent) */
+  alert_below?: number | null;
+  alert_above?: number | null;
 }
 
 export interface Pension {

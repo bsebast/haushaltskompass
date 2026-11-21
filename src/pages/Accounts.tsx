@@ -7,6 +7,7 @@ import AmountInput from '../components/AmountInput';
 import { BalanceChart } from '../components/charts';
 import { listAccounts, saveAccount, deleteAccount, deletePerson, personSummary, findMissingCounterparts, applyMissingCounterparts, type MissingCounterpart, listSnapshots, saveSnapshot, deleteSnapshot } from '../db/repo';
 import { balanceTrend } from '../db/reports';
+import { setAccountLimits, listAlerts } from '../db/alerts';
 import { ACCOUNT_TYPES, type Account, type AccountType } from '../db/types';
 import { useTxDialog } from '../components/Layout';
 import { formatDate, parseDate, today, currentMonth, addMonths } from '../lib/dates';
@@ -29,6 +30,7 @@ export default function Accounts() {
     setOwner(null);
   };
   const owners = useMemo(() => [...new Set(accounts.map((a) => a.owner ?? ''))].sort(), [accounts]);
+  const alerts = useQuery((b) => listAlerts(b).filter((x) => x.kind === 'account'));
   const shown = accounts.filter((a) => owner === null || (a.owner ?? '') === owner);
   const groups = owners.filter((o) => owner === null || o === owner).map((o) => ({ owner: o, items: shown.filter((a) => (a.owner ?? '') === o) }));
   const total = shown.filter((a) => !a.archived && !a.external).reduce((s, a) => s + a.balance, 0);
@@ -81,6 +83,7 @@ export default function Accounts() {
                         a.balance_date ? `Stand ${formatDate(a.balance_date)}` : null, a.external ? 'extern' : null, a.archived ? 'archiviert' : null].filter(Boolean).join(' · ')}
                     </div>
                     {a.note && <div className="text-xs text-warning">{a.note}</div>}
+                    {alerts.filter((x) => x.id === a.id).map((x) => <div key={x.dir} className="text-xs text-danger font-medium">{x.dir === 'below' ? 'Unter' : 'Über'} der Warngrenze von {formatCents(x.limit)}</div>)}
                   </div>
                   <Money cents={a.balance} className="font-semibold" />
                   <button className="btn-ghost w-9 px-0" aria-label={`Kontostände von ${a.name}`} title="Kontostände" onClick={() => setHistory(a)}><History size={16} /></button>
@@ -166,15 +169,23 @@ function AccountDialog({ account, onClose, owners }: { account: Account | null; 
   const [note, setNote] = useState(account?.note ?? '');
   const [archived, setArchived] = useState(!!account?.archived);
   const [external, setExternal] = useState(!!account?.external);
+  const [minBal, setMinBal] = useState<number | null>(account?.min_balance != null ? Math.abs(account.min_balance) : null);
+  const [minNeg, setMinNeg] = useState((account?.min_balance ?? 0) < 0);
+  const [maxBal, setMaxBal] = useState<number | null>(account?.max_balance ?? null);
   const [error, setError] = useState<string | null>(null);
 
   const save = () => {
     try {
       const r = rate.trim() ? Number(rate.replace(',', '.')) / 100 : null;
       if (r != null && Number.isNaN(r)) throw new Error('Ungültiger Zinssatz.');
-      saveAccount(book, {
+      const lo = minBal == null ? null : (minNeg ? -1 : 1) * minBal;
+      if (lo != null && maxBal != null && lo > maxBal) throw new Error('Die Untergrenze muss kleiner sein als die Obergrenze.');
+      book.tx(() => {
+      const savedId = saveAccount(book, {
         id: account?.id, name, type, owner: owner || null, bank: bank || null, iban: iban.replace(/\s/g, '') || null,
         opening_balance: (negative ? -1 : 1) * (opening ?? 0), archived, external, interest_rate: r, exemption, exemption_used: used, note: note || null,
+      });
+      setAccountLimits(book, savedId, lo, maxBal);
       });
       onClose();
     } catch (e) { setError((e as Error).message); }
@@ -214,6 +225,13 @@ function AccountDialog({ account, onClose, owners }: { account: Account | null; 
         <div className="grid sm:grid-cols-2 gap-3">
           <Field label="Freistellungsauftrag"><AmountInput value={exemption} onChange={setExemption} /></Field>
           <Field label="davon verbraucht"><AmountInput value={used} onChange={setUsed} /></Field>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <Field label="Hinweis, wenn Kontostand unter" hint="optional, z. B. 500 € auf dem Girokonto">
+            <div className="flex gap-2 items-center"><div className="flex-1"><AmountInput value={minBal} onChange={setMinBal} ariaLabel="Untergrenze" /></div>
+              <label className="text-xs flex items-center gap-1 whitespace-nowrap"><input type="checkbox" checked={minNeg} onChange={(e) => setMinNeg(e.target.checked)} /> im Minus</label></div>
+          </Field>
+          <Field label="Hinweis, wenn Kontostand über" hint="optional, z. B. um Geld umzuschichten"><AmountInput value={maxBal} onChange={setMaxBal} ariaLabel="Obergrenze" /></Field>
         </div>
         <Field label="Bemerkung"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={external} onChange={(e) => setExternal(e.target.checked)} /> Externes Konto (nur Gegenkonto für Durchbuchungen, zählt nicht zum Vermögen)</label>

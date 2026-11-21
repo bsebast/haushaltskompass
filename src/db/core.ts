@@ -3,7 +3,7 @@ import schema from './schema.sql?raw';
 import { seedDefaults } from './seed';
 import { now } from '../lib/id';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 /** Migrationen von Version n-1 auf n. Neue Bücher starten mit schema.sql (Version 1) und durchlaufen alle Migrationen. */
 const MIGRATIONS: Record<number, string> = {
@@ -98,6 +98,29 @@ const MIGRATIONS: Record<number, string> = {
   `,
   5: `
     alter table accounts add column external integer not null default 0;
+  `,
+  6: `
+    alter table accounts add column min_balance integer;
+    alter table accounts add column max_balance integer;
+    alter table holdings add column alert_below integer;
+    alter table holdings add column alert_above integer;
+    create table inventory (
+      id text primary key,
+      name text not null check (length(name) between 1 and 120),
+      category text,
+      room text,
+      owner text,
+      purchase_date text,
+      purchase_price integer,
+      current_value integer,
+      useful_life integer,
+      serial text,
+      warranty_until text,
+      insurance text,
+      note text,
+      document_id text references documents(id) on delete set null,
+      created_at text not null, updated_at text not null
+    );
   `,
 };
 

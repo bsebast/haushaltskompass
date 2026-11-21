@@ -1,4 +1,5 @@
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, AreaChart, Area, PieChart, Pie, Cell } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend, AreaChart, Area, PieChart, Pie, Cell, LineChart, Line, ReferenceLine, Sankey } from 'recharts';
+import type { NodeProps, LinkProps } from 'recharts/types/chart/Sankey';
 import { formatCents } from '../lib/money';
 import { monthLabel } from '../lib/dates';
 
@@ -126,6 +127,72 @@ export function StackedAreaChart({ data, keys, height = 300, onPick }: { data: R
             stroke={SERIES[i % SERIES.length]} strokeWidth={2} fill={SERIES[i % SERIES.length]} fillOpacity={0.35} />
         ))}
       </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+/** Prognose: Kontostand je Szenario, optional mit Warngrenze. */
+export function ForecastChart({ data, series, floor, height = 300, onPick }: {
+  data: Record<string, number | string>[]; series: { key: string; name: string; color: string }[]; floor?: number | null; height?: number; onPick?: (month: string) => void;
+}) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <LineChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} {...chartPick(data, onPick && ((r) => onPick(String(r.month))))}>
+        <CartesianGrid vertical={false} stroke={css('border')} />
+        <XAxis dataKey="month" tickFormatter={(m) => monthLabel(m)} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={88} />
+        <Tooltip formatter={euro} labelFormatter={monthTip} />
+        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <ReferenceLine y={0} stroke={css('text-muted')} strokeOpacity={0.5} />
+        {floor != null && <ReferenceLine y={floor} stroke={css('danger')} strokeDasharray="4 4" label={{ value: 'Warngrenze', fontSize: 11, fill: css('danger'), position: 'insideTopLeft' }} />}
+        {series.map((s, i) => (
+          <Line key={s.key} isAnimationActive={false} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={i === 0 ? 2.5 : 2} dot={false}
+            strokeDasharray={i === 0 ? undefined : '6 3'} />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+export interface FlowChartNode { name: string; color: string; side: 'in' | 'hub' | 'out'; amount: number }
+
+/** Geldfluss als Flussdiagramm: links Einnahmen, Mitte verfügbares Geld, rechts Ausgaben. */
+export function FlowChart<N extends FlowChartNode>({ nodes, links, height = 420, onPick }: {
+  nodes: N[]; links: { source: number; target: number; value: number }[]; height?: number; onPick?: (node: N) => void;
+}) {
+  const Node = (p: NodeProps) => {
+    const n = nodes[p.index];
+    if (!n) return null;
+    const right = n.side === 'out';
+    const hub = n.side === 'hub';
+    const tx = right ? p.x + p.width + 6 : hub ? p.x + p.width / 2 : p.x - 6;
+    const anchor = right ? 'start' : hub ? 'middle' : 'end';
+    const ty = hub ? p.y - 8 : p.y + p.height / 2;
+    return (
+      <g style={{ cursor: onPick && !hub ? 'pointer' : undefined }} onClick={() => onPick && !hub && onPick(n)}>
+        <rect x={p.x} y={p.y} width={p.width} height={Math.max(1, p.height)} fill={n.color} rx={2} />
+        <text x={tx} y={ty} textAnchor={anchor} dominantBaseline="middle" fontSize={12} fill={css('text')}>
+          {n.name} <tspan fill={css('text-muted')}>{short(n.amount)}</tspan>
+        </text>
+      </g>
+    );
+  };
+  const Link = (p: LinkProps) => {
+    const l = links[p.index];
+    const target = l ? nodes[l.target] : undefined;
+    const source = l ? nodes[l.source] : undefined;
+    const color = (target?.side === 'out' ? target : source)?.color ?? '#8a8478';
+    return (
+      <path d={`M${p.sourceX},${p.sourceY} C${p.sourceControlX},${p.sourceY} ${p.targetControlX},${p.targetY} ${p.targetX},${p.targetY}`}
+        fill="none" stroke={color} strokeOpacity={0.35} strokeWidth={Math.max(1, p.linkWidth)} />
+    );
+  };
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <Sankey data={{ nodes: nodes.map((n) => ({ name: n.name })), links }} nodeWidth={12} nodePadding={14} sort={false} iterations={0}
+        margin={{ top: 24, right: 200, bottom: 8, left: 200 }} node={Node} link={Link}>
+        <Tooltip formatter={euro} />
+      </Sankey>
     </ResponsiveContainer>
   );
 }

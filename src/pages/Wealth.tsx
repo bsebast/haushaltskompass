@@ -1,6 +1,13 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '../state';
-import { PageHeader, Money, Empty } from '../components/ui';
+import { Link } from 'react-router-dom';
+import { Bell } from 'lucide-react';
+import { useBook, useQuery } from '../state';
+import { PageHeader, Money, Empty, Modal, Field, ErrorNote } from '../components/ui';
+import AmountInput from '../components/AmountInput';
+import { listInventory, inventoryInWealth, inventoryTotals } from '../db/inventory';
+import { setHoldingAlerts, unitPrice } from '../db/alerts';
+import type { Holding } from '../db/types';
+import { formatCents } from '../lib/money';
 import { BalanceChart } from '../components/charts';
 import { listAccounts, listHoldings, listSnapshots } from '../db/repo';
 import { balancesAt } from '../db/reports';
@@ -30,6 +37,10 @@ export default function Wealth() {
   accounts.filter((a) => owner === null || (a.owner ?? '') === owner).forEach((a) => byType.set(ACCOUNT_TYPES[a.type], (byType.get(ACCOUNT_TYPES[a.type]) ?? 0) + a.balance));
   const shownHoldings = holdings.filter((h) => owner === null || (h.owner ?? '') === owner);
   const hOwners = [...new Set(shownHoldings.map((h) => h.owner ?? ''))];
+  const inv = useQuery((b) => (inventoryInWealth(b) ? listInventory(b) : []));
+  const invShown = inv.filter((x) => owner === null || (x.owner ?? '') === owner);
+  if (invShown.length) byType.set('Inventar (Zeitwert)', inventoryTotals(invShown).value);
+  const [alertFor, setAlertFor] = useState<Holding | null>(null);
 
   if (!accounts.length) return <><PageHeader title="Vermögen" /><div className="card"><Empty title="Noch keine Konten" /></div></>;
 
@@ -69,7 +80,7 @@ export default function Wealth() {
           <table className="w-full text-sm min-w-[720px] mt-2">
             <thead className="bg-surface-2 text-xs text-text-muted">
               <tr><th className="text-left px-4 py-2 font-medium">Wertpapier</th><th className="text-left px-2 font-medium">ISIN / WKN</th><th className="text-right px-2 font-medium">Anzahl</th>
-                <th className="text-right px-2 font-medium">Einstand</th><th className="text-right px-2 font-medium">Kurswert</th><th className="text-right px-4 font-medium">Gewinn</th></tr>
+                <th className="text-right px-2 font-medium">Einstand</th><th className="text-right px-2 font-medium">Kurswert</th><th className="text-right px-2 font-medium">Gewinn</th><th className="px-4 font-medium"><span className="sr-only">Kursgrenzen</span></th></tr>
             </thead>
             {hOwners.map((o) => {
               const hs = shownHoldings.filter((h) => (h.owner ?? '') === o);
@@ -78,7 +89,7 @@ export default function Wealth() {
               return (
                 <tbody key={o} className="divide-y divide-border">
                   <tr className="bg-surface-2/60"><td colSpan={4} className="px-4 py-1.5 font-semibold">{o || 'Ohne Inhaber'}{hs[0]?.as_of ? <span className="font-normal text-xs text-text-muted"> · Stand {formatDate(hs[0].as_of)}</span> : null}</td>
-                    <td className="text-right px-2 font-semibold"><Money cents={mv} colored={false} /></td><td className="text-right px-4 font-semibold">{cv ? <Money cents={mv - cv} /> : null}</td></tr>
+                    <td className="text-right px-2 font-semibold"><Money cents={mv} colored={false} /></td><td className="text-right px-2 font-semibold">{cv ? <Money cents={mv - cv} /> : null}</td><td /></tr>
                   {hs.map((h) => (
                     <tr key={h.id}>
                       <td className="px-4 py-1.5">{h.name}</td>
@@ -86,7 +97,8 @@ export default function Wealth() {
                       <td className="text-right px-2 tabular-nums">{h.quantity.toLocaleString('de-DE', { maximumFractionDigits: 3 })}</td>
                       <td className="text-right px-2">{h.cost_value != null ? <Money cents={h.cost_value} colored={false} /> : '–'}</td>
                       <td className="text-right px-2">{h.market_value != null ? <Money cents={h.market_value} colored={false} /> : '–'}</td>
-                      <td className="text-right px-4">{h.market_value != null && h.cost_value ? <><Money cents={h.market_value - h.cost_value} /> <span className="text-xs text-text-muted">{Math.round(((h.market_value - h.cost_value) / h.cost_value) * 100)} %</span></> : '–'}</td>
+                      <td className="text-right px-2">{h.market_value != null && h.cost_value ? <><Money cents={h.market_value - h.cost_value} /> <span className="text-xs text-text-muted">{Math.round(((h.market_value - h.cost_value) / h.cost_value) * 100)} %</span></> : '–'}</td>
+                      <td className="px-4 text-right"><HoldingAlertButton h={h} onClick={() => setAlertFor(h)} /></td>
                     </tr>
                   ))}
                 </tbody>
@@ -95,6 +107,42 @@ export default function Wealth() {
           </table>
         )}
       </section>
+      {inv.length === 0 && <p className="text-xs text-text-muted mt-3">Wertgegenstände erfasst du im <Link to="/inventar" className="text-accent hover:underline">Inventar</Link>. Dort lässt sich ihr Zeitwert zum Vermögen hinzunehmen.</p>}
+      {alertFor && <HoldingAlertDialog h={alertFor} onClose={() => setAlertFor(null)} />}
     </>
+  );
+}
+
+function HoldingAlertButton({ h, onClick }: { h: Holding; onClick: () => void }) {
+  const p = unitPrice(h);
+  const hit = p != null && ((h.alert_below != null && p < h.alert_below) || (h.alert_above != null && p > h.alert_above));
+  const set = h.alert_below != null || h.alert_above != null;
+  return (
+    <button onClick={onClick} aria-label={`Kursgrenzen für ${h.name}`} title={set ? `Kursgrenzen: ${[h.alert_below != null && `unter ${formatCents(h.alert_below)}`, h.alert_above != null && `über ${formatCents(h.alert_above)}`].filter(Boolean).join(', ')}` : 'Kursgrenzen festlegen'}
+      className={`inline-flex ${hit ? 'text-danger' : set ? 'text-accent' : 'text-text-muted hover:text-text'}`}><Bell size={15} fill={hit ? 'currentColor' : 'none'} /></button>
+  );
+}
+
+function HoldingAlertDialog({ h, onClose }: { h: Holding; onClose: () => void }) {
+  const book = useBook();
+  const [below, setBelow] = useState<number | null>(h.alert_below ?? null);
+  const [above, setAbove] = useState<number | null>(h.alert_above ?? null);
+  const [error, setError] = useState<string | null>(null);
+  const p = unitPrice(h);
+  const save = () => {
+    try { setHoldingAlerts(book, h.id, below, above); onClose(); } catch (e) { setError((e as Error).message); }
+  };
+  return (
+    <Modal title={`Kursgrenzen: ${h.name}`} onClose={onClose} footer={<>
+      <button className="btn-secondary" onClick={onClose}>Abbrechen</button>
+      <button className="btn-primary" onClick={save}>Speichern</button>
+    </>}>
+      <p className="text-sm text-text-muted mb-3">Aktueller Kurs je Stück: {p != null ? formatCents(p) : 'unbekannt'}{h.as_of ? ` (Stand ${h.as_of.split('-').reverse().join('.')})` : ''}. Die Übersicht zeigt einen Hinweis, sobald eine Grenze erreicht ist.</p>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Hinweis unter"><AmountInput value={below} onChange={setBelow} ariaLabel="Kursgrenze unten" /></Field>
+        <Field label="Hinweis über"><AmountInput value={above} onChange={setAbove} ariaLabel="Kursgrenze oben" /></Field>
+      </div>
+      <ErrorNote error={error} />
+    </Modal>
   );
 }

@@ -367,3 +367,46 @@ export function saveView(b: Book, v: SavedView) {
 export function deleteView(b: Book, name: string) {
   b.setMeta('report_views', JSON.stringify(listViews(b).filter((x) => x.name !== name)));
 }
+
+/* ---------- Geldfluss (woher kommt das Geld, wohin fließt es) ---------- */
+
+export interface FlowNode { name: string; color: string; side: 'in' | 'hub' | 'out'; root: string | null | '#saving' | '#surplus' | '#deficit' | '#other-in' | '#other-out'; amount: number }
+export interface MoneyFlow { nodes: FlowNode[]; links: { source: number; target: number; value: number }[]; income: number; outflow: number }
+
+/** Baut die Knoten und Verbindungen für ein Flussdiagramm: Einnahmen je Oberkategorie → Topf → Ausgaben je Oberkategorie, Sparen, Überschuss. */
+export function moneyFlow(lines: Line[], cats: Category[], maxPerSide = 8): MoneyFlow {
+  const inc = new Map<string | null, number>();
+  const out = new Map<string | null, number>();
+  let saving = 0;
+  for (const l of lines) {
+    if (l.kind === 'income') inc.set(l.root_id, (inc.get(l.root_id) ?? 0) + l.amount);
+    else if (l.kind === 'saving') saving -= l.amount;
+    else out.set(l.root_id, (out.get(l.root_id) ?? 0) - l.amount);
+  }
+  const name = (id: string | null) => cats.find((c) => c.id === id)?.name ?? 'Ohne Kategorie';
+  const color = (id: string | null) => cats.find((c) => c.id === id)?.color ?? '#8a8478';
+  const top = (m: Map<string | null, number>) => {
+    const arr = [...m.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    return { head: arr.slice(0, maxPerSide), rest: arr.slice(maxPerSide).reduce((a, [, v]) => a + v, 0) };
+  };
+  const ti = top(inc);
+  const to = top(out);
+  const income = [...inc.values()].reduce((a, v) => a + Math.max(0, v), 0);
+  const outflow = [...out.values()].reduce((a, v) => a + Math.max(0, v), 0) + Math.max(0, saving);
+  const nodes: FlowNode[] = [];
+  const links: MoneyFlow['links'] = [];
+  const left: FlowNode[] = ti.head.map(([id, v]) => ({ name: name(id), color: color(id), side: 'in' as const, root: id, amount: v }));
+  if (ti.rest > 0) left.push({ name: 'Weitere Einnahmen', color: '#8a8478', side: 'in', root: '#other-in', amount: ti.rest });
+  if (outflow > income) left.push({ name: 'Aus Rücklagen', color: '#b45309', side: 'in', root: '#deficit', amount: outflow - income });
+  const right: FlowNode[] = to.head.map(([id, v]) => ({ name: name(id), color: color(id), side: 'out' as const, root: id, amount: v }));
+  if (to.rest > 0) right.push({ name: 'Weitere Ausgaben', color: '#8a8478', side: 'out', root: '#other-out', amount: to.rest });
+  if (saving > 0) right.push({ name: 'Sparen & Anlegen', color: '#2f7d6d', side: 'out', root: '#saving', amount: saving });
+  if (income > outflow) right.push({ name: 'Überschuss', color: '#5b8c3a', side: 'out', root: '#surplus', amount: income - outflow });
+  if (!left.length || !right.length) return { nodes: [], links: [], income, outflow };
+  nodes.push(...left);
+  const hub = nodes.length;
+  nodes.push({ name: 'Verfügbares Geld', color: '#64748b', side: 'hub', root: null, amount: Math.max(income, outflow) });
+  left.forEach((n, i) => links.push({ source: i, target: hub, value: n.amount }));
+  right.forEach((n) => { nodes.push(n); links.push({ source: hub, target: nodes.length - 1, value: n.amount }); });
+  return { nodes, links, income, outflow };
+}

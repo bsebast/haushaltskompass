@@ -4,12 +4,13 @@ import { Download, Printer, Bookmark, X, ChevronRight, ChevronDown } from 'lucid
 import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Dot, ErrorNote } from '../components/ui';
 import CategorySelect from '../components/CategorySelect';
-import { CashflowChart, FixVarChart, StackedAreaChart, DonutChart, SERIES } from '../components/charts';
+import { CashflowChart, FixVarChart, StackedAreaChart, DonutChart, FlowChart, SERIES } from '../components/charts';
 import { DrillCell, useDrill, partsFromLines, partsFromTx } from '../components/DrillDown';
 import { listAccounts, listCategories, descendantIds } from '../db/repo';
 import {
   reportLines, periodKey, periodBounds, wealthAccounts, periodsBetween, periodLabel, cashflow, sumCashflow, pivot, compareByRoot, shiftYear, topPayees,
-  contractsPlanVsActual, wealthSeries, accountAudit, listViews, saveView, deleteView,
+  contractsPlanVsActual, wealthSeries, accountAudit, listViews, saveView, deleteView, moneyFlow,
+  type FlowNode,
   type Granularity, type ReportFilter, type WealthGroup, type Line, type PivotRow,
 } from '../db/analytics';
 import { ACCOUNT_TYPES } from '../db/types';
@@ -19,9 +20,9 @@ import { download } from '../lib/csvExport';
 
 /* ---------- Zustand in der Adresszeile (teilbar, speicherbar) ---------- */
 
-type Tab = 'ueberblick' | 'kategorien' | 'fixkosten' | 'vorjahr' | 'empfaenger' | 'vermoegen' | 'abgleich';
+type Tab = 'ueberblick' | 'geldfluss' | 'kategorien' | 'fixkosten' | 'vorjahr' | 'empfaenger' | 'vermoegen' | 'abgleich';
 const TABS: [Tab, string][] = [
-  ['ueberblick', 'Überblick'], ['kategorien', 'Kategorien × Zeit'], ['fixkosten', 'Fix & variabel'], ['vorjahr', 'Vorjahresvergleich'],
+  ['ueberblick', 'Überblick'], ['geldfluss', 'Geldfluss'], ['kategorien', 'Kategorien × Zeit'], ['fixkosten', 'Fix & variabel'], ['vorjahr', 'Vorjahresvergleich'],
   ['empfaenger', 'Empfänger'], ['vermoegen', 'Vermögen'], ['abgleich', 'Kontoabgleich'],
 ];
 
@@ -108,6 +109,7 @@ export default function Reports() {
       </div>
       <h2 className="print-only text-lg font-semibold mb-2">{TABS.find(([k]) => k === s.tab)?.[1]}</h2>
       {s.tab === 'ueberblick' && <Overview f={s.filter} g={s.g} />}
+      {s.tab === 'geldfluss' && <FlowView f={s.filter} />}
       {s.tab === 'kategorien' && <PivotView f={s.filter} g={s.g} />}
       {s.tab === 'fixkosten' && <FixedView f={s.filter} g={s.g} />}
       {s.tab === 'vorjahr' && <YearCompare f={s.filter} />}
@@ -337,6 +339,40 @@ function Breakdown({ f, kind }: { f: ReportFilter; kind: 'expense' | 'income' })
             ))}
           </tbody></table>
         </div>
+      )}
+    </section>
+  );
+}
+
+/* ---------- Geldfluss ---------- */
+
+function FlowView({ f }: { f: ReportFilter }) {
+  const lines = useQuery((b) => reportLines(b, f), [JSON.stringify(f)]);
+  const cats = useQuery(listCategories);
+  const flow = useMemo(() => moneyFlow(lines, cats), [lines, cats]);
+  const show = useShowLines(f);
+  const top = new Set(flow.nodes.map((n) => n.root));
+  const pick = (n: FlowNode) => {
+    const r = n.root;
+    if (r === '#deficit' || r === '#surplus' || r === null && n.side === 'hub') return;
+    if (r === '#saving') return show('Sparen & Anlegen', (l) => l.kind === 'saving');
+    if (r === '#other-in') return show('Weitere Einnahmen', (l) => l.kind === 'income' && !top.has(l.root_id));
+    if (r === '#other-out') return show('Weitere Ausgaben', (l) => l.kind === 'expense' && !top.has(l.root_id));
+    const kind = n.side === 'in' ? 'income' : 'expense';
+    show(`${kind === 'income' ? 'Einnahmen' : 'Ausgaben'} · ${n.name}`, (l) => l.kind === kind && l.root_id === r);
+  };
+  useExportTable({
+    name: 'geldfluss', head: ['Richtung', 'Kategorie', 'Betrag'],
+    rows: flow.nodes.filter((n) => n.side !== 'hub').map((n) => [n.side === 'in' ? 'Herkunft' : 'Verwendung', n.name, eur(n.amount)]),
+  });
+  return (
+    <section className="card p-4">
+      <h3 className="text-sm font-semibold mb-1">Woher das Geld kommt und wohin es fließt</h3>
+      <p className="text-xs text-text-muted mb-3">Einnahmen <Money cents={flow.income} colored={false} /> · Ausgaben und Sparen <Money cents={flow.outflow} colored={false} />. Umbuchungen zwischen eigenen Konten zählen nicht. Ein Klick auf eine Kategorie zeigt die Buchungen.</p>
+      {flow.nodes.length === 0 ? <p className="text-sm text-text-muted">Keine Daten in diesem Zeitraum.</p> : (
+        <div className="overflow-x-auto"><div className="min-w-[760px]">
+          <FlowChart nodes={flow.nodes} links={flow.links} height={Math.max(360, flow.nodes.length * 34)} onPick={pick} />
+        </div></div>
       )}
     </section>
   );

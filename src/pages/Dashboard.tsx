@@ -13,6 +13,9 @@ import { useTxDialog } from '../components/Layout';
 import { DrillCell, useDrill, partsFromLines, partsFromTx } from '../components/DrillDown';
 import { reportLines } from '../db/analytics';
 import { listContracts, perMonth, upcoming } from '../db/contracts';
+import { listAlerts } from '../db/alerts';
+import { listInventory, warrantyEndingSoon } from '../db/inventory';
+import { formatCents } from '../lib/money';
 
 function Card({ title, link, children, className = '' }: { title: string; link?: [string, string]; children: React.ReactNode; className?: string }) {
   return (
@@ -121,6 +124,8 @@ export default function Dashboard() {
   const hints = useQuery((b) => savingHints(b, m), [m]);
   const open = useQuery((b) => listTransactions(b, { uncategorized: true }).length);
   const contracts = useQuery((b) => listContracts(b));
+  const alerts = useQuery(listAlerts);
+  const warranties = useQuery((b) => listInventory(b).filter((x) => warrantyEndingSoon(x, 30)));
   const { openNew } = useTxDialog();
   const total = accounts.filter((a) => !a.external).reduce((s, a) => s + a.balance, 0);
   const drill = useDrill();
@@ -159,6 +164,23 @@ export default function Dashboard() {
 
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {(alerts.length > 0 || warranties.length > 0) && (
+        <section role="status" className="card p-4 md:col-span-2 xl:col-span-3 border-warning/50 bg-warning/5">
+          <h2 className="text-sm font-semibold mb-2">Hinweise</h2>
+          <ul className="space-y-1 text-sm">
+            {alerts.map((x) => (
+              <li key={`${x.kind}-${x.id}-${x.dir}`}>
+                <Link to={x.kind === 'account' ? `/buchungen?konto=${x.id}` : '/vermoegen'} className="font-medium hover:underline">{x.name}</Link>
+                {x.kind === 'account' ? ': Kontostand ' : ': Kurs '}<Money cents={x.value} colored={false} className="font-medium" />
+                {x.dir === 'below' ? ' liegt unter ' : ' liegt über '}der Grenze von {formatCents(x.limit)}{x.as_of ? <span className="text-text-muted text-xs"> (Stand {formatDate(x.as_of)})</span> : null}
+              </li>
+            ))}
+            {warranties.map((x) => (
+              <li key={x.id}><Link to="/inventar" className="font-medium hover:underline">{x.name}</Link>: Garantie endet am {formatDate(x.warranty_until!)}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       <Card title={`Was bleibt im ${monthLabel(m, true)}`} link={['/auswertungen', 'Auswertungen']}>
         <div className="text-3xl font-semibold"><Money cents={left.left} /></div>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">

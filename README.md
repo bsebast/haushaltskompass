@@ -28,6 +28,10 @@ npm run build      # statischer Build in dist/
 - Kontostände zu Stichtagen (für Depots und Konten ohne Einzelbuchungen) und Vermögensverlauf
 - Vermögen: Depotpositionen mit Einstand, Kurswert und Gewinn
 - Vorsorge: Renten und Versicherungen mit Einmalbetrag, Monatsrente und Hochrechnungen
+- Prognose: voraussichtlicher Kontostand der nächsten 6 bis 60 Monate aus dem Durchschnitt der letzten Monate, Verträge im Fälligkeitsmonat, große Einzelausgaben herausgerechnet, mit Szenarien (einmalig, monatlich, prozentual) und Warngrenze
+- Geldfluss (Auswertungen → Geldfluss): Flussdiagramm von den Einnahmen über das verfügbare Geld zu Ausgaben, Sparen und Überschuss, Klick zeigt die Buchungen
+- Inventar: Wertgegenstände mit Kaufpreis, Zeitwert (von Hand oder linear über die Nutzungsdauer), Garantie, Versicherung und Beleg (Bild/PDF im Haushaltsbuch), CSV und Druck; Zeitwert optional im Vermögen
+- Warngrenzen: Unter- und Obergrenze je Konto, Kursgrenzen je Depotposition (Glocke unter Vermögen); die Übersicht zeigt Hinweise, auch zu bald endenden Garantien
 - Gesamtimport (Einstellungen → Daten importieren) im Format `haushaltskompass-import` (JSON, siehe `src/db/importer.ts`)
 - Sicherung und Wiederherstellung als Datei, CSV-Export
 - Bankabruf per FinTS (Buchungen → Bankabruf), siehe unten
