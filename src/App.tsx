@@ -1,3 +1,4 @@
+import { DrillPage } from './components/DrillDown';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useBookCtx } from './state';
 import Layout from './components/Layout';
@@ -47,6 +48,7 @@ export default function App() {
         <Route path="prognose" element={<Forecast />} />
         <Route path="inventar" element={<Inventory />} />
         <Route path="auswertungen" element={<Reports />} />
+        <Route path="details/:id" element={<DrillPage />} />
         <Route path="einstellungen" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -1,6 +1,6 @@
 import { DrillProvider } from './DrillDown';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useMatch } from 'react-router-dom';
 import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText, Landmark, Umbrella, TrendingUp, Package, Sun, Moon, X } from 'lucide-react';
 import { useTheme } from '../lib/theme';
 import { useBookCtx } from '../state';
@@ -80,6 +80,20 @@ export default function Layout() {
   }, [dialog, openNew]);
 
   const name = book?.meta('book_name') ?? 'Haushaltsbuch';
+  // Buchungen einer Auswertung in eigenem Tab: volle Breite, ohne Menü und Kopfzeile
+  const bare = !!useMatch('/details/:id');
+  const txDialog = dialog && <TxDialog onClose={() => setDialog(null)} edit={dialog.edit} initialMode={dialog.mode} initialAccount={dialog.account} />;
+
+  if (bare) {
+    return (
+      <TxContext.Provider value={{ openNew, openEdit }}>
+        <main className="px-4 lg:px-8 py-6 min-h-full">
+          <Outlet />
+        </main>
+        {txDialog}
+      </TxContext.Provider>
+    );
+  }
 
   return (
     <TxContext.Provider value={{ openNew, openEdit }}>
@@ -129,7 +143,7 @@ export default function Layout() {
           </main>
         </div>
       </div>
-      {dialog && <TxDialog onClose={() => setDialog(null)} edit={dialog.edit} initialMode={dialog.mode} initialAccount={dialog.account} />}
+      {txDialog}
     </TxContext.Provider>
   );
 }

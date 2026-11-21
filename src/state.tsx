@@ -19,6 +19,10 @@ interface Ctx {
 
 const BookContext = createContext<Ctx | null>(null);
 
+/** Meldet anderen offenen Tabs, dass der gespeicherte Stand neu ist (z. B. Buchungen einer Auswertung in eigenem Tab). */
+const SYNC_KEY = 'hk:book-saved';
+const TAB_ID = Math.random().toString(36).slice(2);
+
 /** Spielt eine neue Sicherung ein. Der bisherige Stand wird vorher in privat/vor-import/ abgelegt. */
 function importNewest(sql: SqlJsStatic, current: () => Promise<Uint8Array | null>): Promise<Book | null> {
   return withImportLock(async () => {
@@ -45,6 +49,8 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const timer = useRef<number | undefined>(undefined);
+  /** ungespeicherte eigene Änderung vorhanden */
+  const dirty = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -79,17 +85,20 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
   // Nach jeder Änderung entprellt speichern
   useEffect(() => {
     if (!book) return;
-    const persist = () => {
+    const persist = (announce: boolean) => {
       window.clearTimeout(timer.current);
       setSaving(true);
       timer.current = window.setTimeout(async () => {
         await saveFile(book.export());
+        timer.current = undefined;
         setSaving(false);
+        dirty.current = false;
+        if (announce) try { localStorage.setItem(SYNC_KEY, `${TAB_ID}:${Date.now()}`); } catch { /* ohne Browser-Speicher kein Abgleich */ }
       }, 250);
     };
-    const unsub = book.subscribe(persist);
+    const unsub = book.subscribe(() => { dirty.current = true; persist(true); });
     // Änderungen, die direkt nach dem Anlegen passiert sind (vor diesem Effekt), ebenfalls sichern
-    persist();
+    persist(false);
     const flush = () => {
       if (timer.current) {
         window.clearTimeout(timer.current);
@@ -102,6 +111,24 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('beforeunload', flush);
     };
   }, [book]);
+
+  // Änderungen aus einem anderen Tab übernehmen
+  useEffect(() => {
+    if (!SQL || !book) return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== SYNC_KEY || !e.newValue || e.newValue.startsWith(`${TAB_ID}:`)) return;
+      if (dirty.current) return; // eigene Änderung wird gleich gespeichert und überall gemeldet
+      loadFile()
+        .then((data) => {
+          if (!data || dirty.current) return;
+          book.close();
+          setBook(openBook(SQL, data));
+        })
+        .catch((err) => console.error('Stand aus anderem Tab nicht übernommen:', err));
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [SQL, book]);
 
   // Neue Sicherung in privat/ sofort übernehmen, auch in weiteren offenen Tabs
   useEffect(() => {
