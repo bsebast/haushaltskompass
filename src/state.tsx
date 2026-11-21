@@ -51,6 +51,8 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
   const timer = useRef<number | undefined>(undefined);
   /** ungespeicherte eigene Änderung vorhanden */
   const dirty = useRef(false);
+  /** Stand, der gerade aus einem anderen Tab übernommen wurde: liegt schon so im Speicher, also nicht erneut speichern */
+  const adopted = useRef<Book | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -97,8 +99,10 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
       }, 250);
     };
     const unsub = book.subscribe(() => { dirty.current = true; persist(true); });
-    // Änderungen, die direkt nach dem Anlegen passiert sind (vor diesem Effekt), ebenfalls sichern
-    persist(false);
+    // Änderungen, die direkt nach dem Anlegen passiert sind (vor diesem Effekt), ebenfalls sichern.
+    // Nicht bei einem aus einem anderen Tab übernommenen Stand: Der könnte sonst eine neuere Änderung des anderen Tabs überschreiben.
+    if (adopted.current !== book) persist(false);
+    adopted.current = null;
     const flush = () => {
       if (timer.current) {
         window.clearTimeout(timer.current);
@@ -122,7 +126,9 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
         .then((data) => {
           if (!data || dirty.current) return;
           book.close();
-          setBook(openBook(SQL, data));
+          const next = openBook(SQL, data);
+          adopted.current = next;
+          setBook(next);
         })
         .catch((err) => console.error('Stand aus anderem Tab nicht übernommen:', err));
     };
@@ -149,7 +155,7 @@ export function BookProvider({ children }: { children: React.ReactNode }) {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== IMPORT_MARKER) return;
       loadFile()
-        .then((data) => data && swap(openBook(SQL, data)))
+        .then((data) => { if (!data) return; const next = openBook(SQL, data); adopted.current = next; swap(next); })
         .catch((err) => console.error('Sicherung nicht übernommen:', err));
     };
     import.meta.hot?.on('hk:backup', onBackup);
