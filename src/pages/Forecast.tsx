@@ -82,13 +82,13 @@ export default function Forecast() {
         actions={<button className="btn-secondary" onClick={exportCsv}>CSV exportieren</button>} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <div className="card p-4"><div className="text-xs text-text-muted">Heute</div><div className="text-xl font-semibold mt-1"><Money cents={base.start} /></div>
+        <div className="card p-5"><div className="text-xs text-text-muted">Heute</div><div className="text-xl font-semibold mt-1"><Money cents={base.start} /></div>
           <div className="text-xs text-text-muted mt-0.5">{base.accountIds.length} Konten</div></div>
-        <div className="card p-4"><div className="text-xs text-text-muted">{monthLabel(base.months[base.months.length - 1], true)}</div><div className="text-xl font-semibold mt-1"><Money cents={sum.end} /></div>
+        <div className="card p-5"><div className="text-xs text-text-muted">{monthLabel(base.months[base.months.length - 1], true)}</div><div className="text-xl font-semibold mt-1"><Money cents={sum.end} /></div>
           <div className="text-xs text-text-muted mt-0.5">Basis, {s.months} Monate</div></div>
-        <div className="card p-4"><div className="text-xs text-text-muted">Tiefster Stand</div><div className="text-xl font-semibold mt-1"><Money cents={sum.low} /></div>
+        <div className="card p-5"><div className="text-xs text-text-muted">Tiefster Stand</div><div className="text-xl font-semibold mt-1"><Money cents={sum.low} /></div>
           <div className="text-xs text-text-muted mt-0.5">{monthLabel(sum.lowMonth, true)}</div></div>
-        <div className="card p-4"><div className="text-xs text-text-muted">Ø Überschuss im Monat</div><div className="text-xl font-semibold mt-1"><Money cents={base.avgIncome + base.avgExpense} /></div>
+        <div className="card p-5"><div className="text-xs text-text-muted">Ø Überschuss im Monat</div><div className="text-xl font-semibold mt-1"><Money cents={base.avgIncome + base.avgExpense} /></div>
           <div className="text-xs text-text-muted mt-0.5">aus {base.historyMonths.length} Monaten</div></div>
       </div>
       {sum.belowFloor && (
@@ -97,7 +97,7 @@ export default function Forecast() {
         </p>
       )}
 
-      <section className="card p-4 mb-4">
+      <section className="card p-5 mb-4">
         <h2 className="text-sm font-semibold mb-3">Voraussichtlicher Kontostand am Monatsende</h2>
         <ForecastChart data={chart} series={runs.map(({ key, name, color }) => ({ key, name, color }))} floor={s.floor} onPick={(m) => setOpen(m)} />
         <p className="text-xs text-text-muted mt-2">
@@ -107,7 +107,7 @@ export default function Forecast() {
       </section>
 
       <div className="grid gap-4 xl:grid-cols-3 mb-4">
-        <section className="card p-4">
+        <section className="card p-5">
           <h2 className="text-sm font-semibold mb-3">Einstellungen</h2>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Vorschau">
@@ -150,7 +150,7 @@ export default function Forecast() {
           </fieldset>
         </section>
 
-        <section className="card p-4 xl:col-span-2">
+        <section className="card p-5 xl:col-span-2">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold">Szenarien</h2>
             <button className="btn-secondary h-8" onClick={addScenario}><Plus size={14} /> Szenario</button>

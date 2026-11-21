@@ -55,10 +55,10 @@ export default function Inventory() {
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <div className="card p-4"><div className="text-xs text-text-muted">Gegenstände</div><div className="text-xl font-semibold mt-1">{shown.length}</div></div>
-            <div className="card p-4"><div className="text-xs text-text-muted">Kaufpreis gesamt</div><div className="text-xl font-semibold mt-1"><Money cents={total.price} colored={false} /></div></div>
-            <div className="card p-4"><div className="text-xs text-text-muted">Zeitwert gesamt</div><div className="text-xl font-semibold mt-1"><Money cents={total.value} colored={false} /></div></div>
-            <div className="card p-4"><div className="text-xs text-text-muted">Garantie endet bald</div><div className="text-xl font-semibold mt-1">{soon.length}</div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Gegenstände</div><div className="text-xl font-semibold mt-1">{shown.length}</div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Kaufpreis gesamt</div><div className="text-xl font-semibold mt-1"><Money cents={total.price} colored={false} /></div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Zeitwert gesamt</div><div className="text-xl font-semibold mt-1"><Money cents={total.value} colored={false} /></div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Garantie endet bald</div><div className="text-xl font-semibold mt-1">{soon.length}</div>
               <div className="text-xs text-text-muted mt-0.5">in den nächsten 60 Tagen</div></div>
           </div>
           <div className="flex flex-wrap items-center gap-3 mb-3 no-print">

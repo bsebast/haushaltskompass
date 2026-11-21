@@ -33,7 +33,7 @@ export default function Budgets() {
       ) : (
         <>
           {monthly.length > 0 && (
-            <div className="card p-4 mb-4">
+            <div className="card p-5 mb-4">
               <div className="flex justify-between text-sm mb-2"><span className="font-medium">Alle Monatsbudgets</span><span><Money cents={spent} colored={false} /> von <Money cents={limit} colored={false} /></span></div>
               <Bar ratio={limit ? spent / limit : 0} state={spent > limit ? 'over' : spent > limit * 0.9 ? 'warn' : 'ok'} />
             </div>

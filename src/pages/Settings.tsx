@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Download, Upload, Trash2 } from 'lucide-react';
+import { Download, Upload, Trash2, Sun, Moon, Monitor } from 'lucide-react';
+import { useTheme, type ThemePref } from '../lib/theme';
 import { useBook, useBookCtx } from '../state';
 import { PageHeader, ErrorNote, Field } from '../components/ui';
 import { download } from '../lib/csvExport';
@@ -46,14 +47,15 @@ export default function Settings() {
     <>
       <PageHeader title="Einstellungen" />
       <div className="grid gap-4 max-w-2xl">
-        <section className="card p-4 space-y-3">
+        <section className="card p-5 space-y-3">
           <h2 className="font-semibold">Haushaltsbuch</h2>
           <form className="flex gap-2 items-end" onSubmit={(e) => { e.preventDefault(); if (name.trim()) { book.setMeta('book_name', name.trim()); setInfo('Name gespeichert.'); } }}>
             <div className="flex-1"><Field label="Name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field></div>
             <button className="btn-secondary" type="submit">Speichern</button>
           </form>
         </section>
-        <section className="card p-4 space-y-3">
+        <AppearanceCard />
+        <section className="card p-5 space-y-3">
           <h2 className="font-semibold">Datensicherung</h2>
           <p className="text-sm text-text-muted">Deine Daten liegen nur in diesem Browser. Erstelle regelmäßig eine Sicherung, zum Beispiel auf einem USB-Stick oder in deinem Cloud-Ordner.
             {lastBackup ? ` Letzte Sicherung: ${new Date(lastBackup).toLocaleString('de-DE')}.` : ' Bisher wurde keine Sicherung erstellt.'}</p>
@@ -65,7 +67,7 @@ export default function Settings() {
             <button className="btn-secondary" onClick={() => exportCsv(listTransactions(book))}><Download size={16} />Alle Buchungen als CSV</button>
           </div>
         </section>
-        <section className="card p-4 space-y-3">
+        <section className="card p-5 space-y-3">
           <h2 className="font-semibold">Daten importieren</h2>
           <p className="text-sm text-text-muted">Importiert eine Haushaltskompass-Importdatei (.json) mit Konten, Kontoständen, Buchungen, Depots, Verträgen und Vorsorge. Vorhandenes wird erkannt und nicht doppelt angelegt.</p>
           <label className="btn-secondary cursor-pointer w-fit"><Upload size={16} />Importdatei wählen
@@ -83,7 +85,7 @@ export default function Settings() {
           )}
           {result && <div className="rounded-md bg-accent-soft p-3 text-sm"><p className="font-medium mb-1">Import abgeschlossen</p><SummaryList s={result} /></div>}
         </section>
-        <section className="card p-4 space-y-3 border-danger/40">
+        <section className="card p-5 space-y-3 border-danger/40">
           <h2 className="font-semibold text-danger">Haushaltsbuch löschen</h2>
           <p className="text-sm text-text-muted">Entfernt alle Daten aus diesem Browser. Lade vorher eine Sicherung herunter.</p>
           <button className="btn-danger" onClick={() => { if (window.confirm('Wirklich alle Daten löschen? Das lässt sich nicht rückgängig machen.')) void reset(); }}><Trash2 size={16} />Alles löschen</button>
@@ -106,5 +108,25 @@ function SummaryList({ s }: { s: ImportSummary }) {
       <ul className="grid grid-cols-2 gap-x-4">{items.filter(([, n]) => n > 0).map(([l, n]) => <li key={l}><strong>{n}</strong> {l}</li>)}</ul>
       {s.warnings.length > 0 && <ul className="text-xs text-warning list-disc pl-4">{s.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}
     </>
+  );
+}
+
+const THEMES: [ThemePref, string, typeof Sun][] = [['system', 'Wie System', Monitor], ['light', 'Hell', Sun], ['dark', 'Dunkel', Moon]];
+
+function AppearanceCard() {
+  const { pref, setPref } = useTheme();
+  return (
+    <section className="card p-5 space-y-3">
+      <h2 className="font-semibold">Darstellung</h2>
+      <p className="text-sm text-text-muted">Der Knopf oben rechts schaltet direkt zwischen hell und dunkel um. Mit „Wie System“ folgt die App wieder der Einstellung von Windows.</p>
+      <div className="inline-flex rounded-lg bg-surface-2 p-1 gap-1" role="radiogroup" aria-label="Farbschema">
+        {THEMES.map(([k, l, Icon]) => (
+          <button key={k} type="button" role="radio" aria-checked={pref === k} onClick={() => setPref(k)}
+            className={`inline-flex items-center gap-2 px-3 h-8 rounded-md text-sm font-medium ${pref === k ? 'bg-surface shadow-card text-text' : 'text-text-muted hover:text-text'}`}>
+            <Icon size={16} aria-hidden />{l}
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -4,9 +4,9 @@ import { formatCents } from '../lib/money';
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: string; actions?: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-3 mb-5">
+    <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
       <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {subtitle && <p className="text-sm text-text-muted mt-0.5">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
@@ -47,9 +47,9 @@ export function Modal({ title, onClose, children, footer, wide }: {
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-text/30 p-0 sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/40 backdrop-blur-[2px] p-0 sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title}
-        className={`bg-surface w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'} sm:rounded-lg shadow-xl max-h-full sm:max-h-[90vh] flex flex-col`}>
+        className={`bg-surface w-full ${wide ? 'sm:max-w-2xl' : 'sm:max-w-lg'} sm:rounded-xl shadow-pop border border-border max-h-full sm:max-h-[90vh] flex flex-col`}>
         <div className="flex items-center justify-between px-5 h-14 border-b border-border shrink-0">
           <h2 className="font-semibold">{title}</h2>
           <button data-close className="btn-ghost w-9 px-0" onClick={onClose} aria-label="Schließen"><X size={18} /></button>

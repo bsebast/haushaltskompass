@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '../state';
-import { Money, Bar, Dot, Empty } from '../components/ui';
+import { Money, Bar, Dot, Empty, PageHeader } from '../components/ui';
 import { BalanceChart, DonutChart, IncomeExpenseChart } from '../components/charts';
 import type { CategoryTotal } from '../db/reports';
 import type { Book } from '../db/core';
@@ -19,9 +19,9 @@ import { formatCents } from '../lib/money';
 
 function Card({ title, link, children, className = '' }: { title: string; link?: [string, string]; children: React.ReactNode; className?: string }) {
   return (
-    <section className={`card p-4 ${className}`}>
+    <section className={`card p-5 ${className}`}>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold">{title}</h2>
+        <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
         {link && <Link to={link[0]} className="text-xs text-accent hover:underline">{link[1]}</Link>}
       </div>
       {children}
@@ -61,10 +61,10 @@ function spanRange(span: Span, month: string): { from: string; to: string; label
 
 function SpanToggle({ value, onChange }: { value: Span; onChange: (s: Span) => void }) {
   return (
-    <div className="inline-flex rounded-md border border-border text-xs overflow-hidden" role="group" aria-label="Zeitraum">
+    <div className="inline-flex rounded-full bg-surface-2 p-0.5 text-xs" role="group" aria-label="Zeitraum">
       {(['month', 'year'] as const).map((s) => (
         <button key={s} type="button" onClick={() => onChange(s)} aria-pressed={value === s}
-          className={`px-2 py-0.5 ${value === s ? 'bg-accent text-white' : 'text-text-muted hover:text-text'}`}>
+          className={`px-2.5 py-0.5 rounded-full ${value === s ? 'bg-surface text-text font-medium shadow-card' : 'text-text-muted hover:text-text'}`}>
           {s === 'month' ? 'Monat' : 'Jahr'}
         </button>
       ))}
@@ -78,9 +78,9 @@ function CategoryCard({ kind, data, span, onSpan, onPick }: {
 }) {
   const none = kind === 'income' ? 'Einnahmen' : 'Ausgaben';
   return (
-    <section className="card p-4">
+    <section className="card p-5">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h2 className="text-sm font-semibold">{none} nach Kategorie</h2>
+        <h2 className="text-sm font-semibold tracking-tight whitespace-nowrap">{none} nach Kategorie</h2>
         <div className="flex items-center gap-2">
           <SpanToggle value={span} onChange={onSpan} />
           <Link to="/auswertungen" className="text-xs text-accent hover:underline">Details</Link>
@@ -163,9 +163,11 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <>
+    <PageHeader title="Übersicht" subtitle={`${new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Gesamtvermögen ${formatCents(total)}`} />
+    <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
       {(alerts.length > 0 || warranties.length > 0) && (
-        <section role="status" className="card p-4 md:col-span-2 xl:col-span-3 border-warning/50 bg-warning/5">
+        <section role="status" className="card p-5 md:col-span-2 xl:col-span-3 border-warning/50 bg-warning/5">
           <h2 className="text-sm font-semibold mb-2">Hinweise</h2>
           <ul className="space-y-1 text-sm">
             {alerts.map((x) => (
@@ -182,7 +184,7 @@ export default function Dashboard() {
         </section>
       )}
       <Card title={`Was bleibt im ${monthLabel(m, true)}`} link={['/auswertungen', 'Auswertungen']}>
-        <div className="text-3xl font-semibold"><Money cents={left.left} /></div>
+        <div className="text-4xl font-semibold mt-1"><Money cents={left.left} /></div>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
           <div><dt className="text-text-muted text-xs">Einnahmen</dt><dd><DrillCell onClick={() => showMonth(m, 'income')}><Money cents={left.income} /></DrillCell></dd></div>
           <div><dt className="text-text-muted text-xs">Ausgaben</dt><dd><DrillCell onClick={() => showMonth(m, 'expense')}><Money cents={-left.expense} /></DrillCell></dd></div>
@@ -222,7 +224,7 @@ export default function Dashboard() {
       </Card>
 
       <Card title="Kontostand der letzten 12 Monate" className="md:col-span-2">
-        <BalanceChart data={trend} onPick={showMoves} />
+        <BalanceChart data={trend} height={300} onPick={showMoves} />
       </Card>
 
       <CategoryCard kind="expense" data={topCats} span={expSpan} onSpan={setExpSpan} onPick={(c) => showCategory(expR, 'expense', c)} />
@@ -272,5 +274,6 @@ export default function Dashboard() {
         </ul>
       </Card>
     </div>
+    </>
   );
 }

@@ -51,10 +51,10 @@ export default function Contracts() {
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-            <div className="card p-4"><div className="text-xs text-text-muted">Fixkosten pro Monat (Ø)</div><div className="text-xl font-semibold mt-1"><Money cents={monthly} /></div></div>
-            <div className="card p-4"><div className="text-xs text-text-muted">Pro Jahr</div><div className="text-xl font-semibold mt-1"><Money cents={yearly} /></div></div>
-            <div className="card p-4"><div className="text-xs text-text-muted">Aktive Verträge</div><div className="text-xl font-semibold mt-1">{active.length}</div></div>
-            <div className="card p-4"><div className="text-xs text-text-muted">Fällig in 30 Tagen</div><div className="text-xl font-semibold mt-1"><Money cents={soon.reduce((a, s) => a + s.contract.amount, 0)} /></div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Fixkosten pro Monat (Ø)</div><div className="text-xl font-semibold mt-1"><Money cents={monthly} /></div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Pro Jahr</div><div className="text-xl font-semibold mt-1"><Money cents={yearly} /></div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Aktive Verträge</div><div className="text-xl font-semibold mt-1">{active.length}</div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Fällig in 30 Tagen</div><div className="text-xl font-semibold mt-1"><Money cents={soon.reduce((a, s) => a + s.contract.amount, 0)} /></div></div>
           </div>
 
           <div className="grid gap-4 2xl:grid-cols-[1fr_340px]">
@@ -121,7 +121,7 @@ export default function Contracts() {
             </div>
 
             <aside className="grid gap-4 md:grid-cols-2 2xl:grid-cols-1 content-start">
-              <section className="card p-4">
+              <section className="card p-5">
                 <h2 className="text-sm font-semibold mb-3">Fällig in den nächsten 30 Tagen</h2>
                 {soon.length === 0 ? <p className="text-sm text-text-muted">Nichts fällig.</p> : (
                   <ul className="space-y-2 text-sm">
@@ -135,7 +135,7 @@ export default function Contracts() {
                   </ul>
                 )}
               </section>
-              <section className="card p-4">
+              <section className="card p-5">
                 <h2 className="text-sm font-semibold mb-3">Ø pro Monat nach Art</h2>
                 <ul className="space-y-1.5 text-sm">
                   {byKind.map(([k, v]) => (

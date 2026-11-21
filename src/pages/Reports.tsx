@@ -227,7 +227,7 @@ function ClickHint() {
 /* ---------- Überblick: Cashflow und Sparquote ---------- */
 
 function Kpi({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
-  return <div className="card p-4"><div className="text-xs text-text-muted">{label}</div><div className="text-xl font-semibold mt-1">{children}</div>{hint && <div className="text-xs text-text-muted mt-0.5">{hint}</div>}</div>;
+  return <div className="card p-5"><div className="text-xs text-text-muted">{label}</div><div className="text-xl font-semibold mt-1">{children}</div>{hint && <div className="text-xs text-text-muted mt-0.5">{hint}</div>}</div>;
 }
 const pct = (v: number | null) => (v === null ? '–' : `${Math.round(v * 100)} %`);
 
@@ -279,12 +279,12 @@ function Overview({ f, g }: { f: ReportFilter; g: Granularity }) {
           {' '}<Link className="text-accent hover:underline" to="/buchungen?zeitraum=all">Zuordnen oder als Umbuchung erfassen</Link>, damit Ausgaben und Sparquote stimmen.
         </p>
       )}
-      <section className="card p-4 mb-4"><h3 className="text-sm font-semibold mb-3">Einnahmen, Ausgaben und Sparen</h3><CashflowChart data={rows} onPick={(p, k) => showKind(k, p)} /><ClickHint /></section>
+      <section className="card p-5 mb-4"><h3 className="text-sm font-semibold mb-3">Einnahmen, Ausgaben und Sparen</h3><CashflowChart data={rows} onPick={(p, k) => showKind(k, p)} /><ClickHint /></section>
       <div className="grid gap-4 xl:grid-cols-2 mb-4">
         <Breakdown f={f} kind="expense" />
         <Breakdown f={f} kind="income" />
       </div>
-      <section className="card p-4 overflow-x-auto">
+      <section className="card p-5 overflow-x-auto">
         <table className="w-full text-sm min-w-[640px]">
           <thead className="text-xs text-text-muted"><tr><th className="text-left py-1">Zeitraum</th><th className="text-right">Einnahmen</th><th className="text-right">Ausgaben</th><th className="text-right">Sparen</th><th className="text-right">Rest</th><th className="text-right">Sparquote</th></tr></thead>
           <tbody className="divide-y divide-border">
@@ -324,7 +324,7 @@ function Breakdown({ f, kind }: { f: ReportFilter; kind: 'expense' | 'income' })
   const pick = (r: { id: string | null; name: string }) =>
     show(`${kind === 'expense' ? 'Ausgaben' : 'Einnahmen'} · ${r.name}`, (l) => (kind === 'income') === (l.amount > 0) && l.root_id === r.id);
   return (
-    <section className="card p-4">
+    <section className="card p-5">
       <h3 className="text-sm font-semibold mb-3">{kind === 'expense' ? 'Ausgaben' : 'Einnahmen'} nach Kategorie</h3>
       {rows.length === 0 ? <p className="text-sm text-text-muted">Keine Daten in diesem Zeitraum.</p> : (
         <div className="grid sm:grid-cols-[180px_1fr] gap-4 items-center">
@@ -366,7 +366,7 @@ function FlowView({ f }: { f: ReportFilter }) {
     rows: flow.nodes.filter((n) => n.side !== 'hub').map((n) => [n.side === 'in' ? 'Herkunft' : 'Verwendung', n.name, eur(n.amount)]),
   });
   return (
-    <section className="card p-4">
+    <section className="card p-5">
       <h3 className="text-sm font-semibold mb-1">Woher das Geld kommt und wohin es fließt</h3>
       <p className="text-xs text-text-muted mb-3">Einnahmen <Money cents={flow.income} colored={false} /> · Ausgaben und Sparen <Money cents={flow.outflow} colored={false} />. Umbuchungen zwischen eigenen Konten zählen nicht. Ein Klick auf eine Kategorie zeigt die Buchungen.</p>
       {flow.nodes.length === 0 ? <p className="text-sm text-text-muted">Keine Daten in diesem Zeitraum.</p> : (
@@ -415,7 +415,7 @@ function PivotView({ f, g }: { f: ReportFilter; g: Granularity }) {
     rows: [...rows.map((r) => [`${'  '.repeat(r.depth)}${r.name}`, ...r.cells.map(eur), eur(r.total), eur(r.avg)]), ['Summe', ...totals.map(eur), eur(grand), eur(Math.round(grand / periods.length))]],
   });
   return (
-    <section className="card p-4">
+    <section className="card p-5">
       <div className="flex flex-wrap items-center gap-3 mb-3 no-print">
         <div className="inline-flex rounded-md bg-surface-2 p-1">
           {(['expense', 'income'] as const).map((k) => (
@@ -500,8 +500,8 @@ function FixedView({ f, g }: { f: ReportFilter; g: Granularity }) {
         <Kpi label="Fixkostenquote" hint="Fixkosten im Verhältnis zu den Einnahmen">{sum.income ? pct(sum.fixed / sum.income) : '–'}</Kpi>
         <Kpi label="Verträge: geplant / gebucht" hint="bis heute, inkl. Sparverträge"><span className="text-base">{formatCents(plannedSum)} / {formatCents(actualSum)}</span></Kpi>
       </div>
-      <section className="card p-4 mb-4"><h3 className="text-sm font-semibold mb-3">Fixkosten und variable Ausgaben</h3><FixVarChart data={rows} onPick={(p, k) => showFix(k, p)} /><ClickHint /></section>
-      <section className="card p-4 overflow-x-auto">
+      <section className="card p-5 mb-4"><h3 className="text-sm font-semibold mb-3">Fixkosten und variable Ausgaben</h3><FixVarChart data={rows} onPick={(p, k) => showFix(k, p)} /><ClickHint /></section>
+      <section className="card p-5 overflow-x-auto">
         <h3 className="text-sm font-semibold mb-1">Verträge: geplant gegen tatsächlich gebucht</h3>
         <p className="text-xs text-text-muted mb-3">Geplant ist der Monatsbetrag des Vertrags mal die Monate im Zeitraum. Weicht der gebuchte Betrag stark ab, hat sich der Beitrag geändert, die Buchung ist keinem Vertrag zugeordnet, oder sie läuft über ein anderes Konto.</p>
         <table className="w-full text-sm min-w-[600px]">
@@ -550,7 +550,7 @@ function YearCompare({ f }: { f: ReportFilter }) {
     rows: rows.map((r) => [r.name, eur(r.previous), eur(r.current), eur(r.diff), r.pct === null ? '' : pct(r.pct)]),
   });
   return (
-    <section className="card p-4 overflow-x-auto">
+    <section className="card p-5 overflow-x-auto">
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <div className="inline-flex rounded-md bg-surface-2 p-1 no-print">
           {(['expense', 'income'] as const).map((k) => (
@@ -599,7 +599,7 @@ function Payees({ f }: { f: ReportFilter }) {
     `${sign === -1 ? 'Ausgaben · ' : sign === 1 ? 'Einnahmen · ' : ''}${payee}`,
     (l) => (l.payee ?? 'Unbekannt').trim() === payee && (!sign || Math.sign(l.amount) === sign));
   return (
-    <section className="card p-4 overflow-x-auto">
+    <section className="card p-5 overflow-x-auto">
       <p className="text-sm text-text-muted mb-3">Die 100 Empfänger und Auftraggeber mit den höchsten Beträgen im Zeitraum.</p>
       <table className="w-full text-sm min-w-[640px]">
         <thead className="text-xs text-text-muted"><tr><th className="text-left py-1">Empfänger / Auftraggeber</th><th className="text-right">Buchungen</th><th className="text-right">Ausgaben</th><th className="w-32"><span className="sr-only">Anteil</span></th><th className="text-right">Einnahmen</th><th className="text-right">Zuletzt</th></tr></thead>
@@ -661,7 +661,7 @@ function Wealth({ f, g }: { f: ReportFilter; g: Granularity }) {
         <Kpi label="Veränderung"><Money cents={last - first} /></Kpi>
         <Kpi label="Depotpositionen (Kurswert)" hint={`${data.depotAsOf ? `Stand ${formatDate(data.depotAsOf)}. ` : ''}Zum Vergleich mit den Depotkonten, nicht zusätzlich gezählt`}><Money cents={data.depotValue} colored={false} /></Kpi>
       </div>
-      <section className="card p-4 mb-4">
+      <section className="card p-5 mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <h3 className="text-sm font-semibold">Kontostände am Ende jedes Zeitraums</h3>
           <select className="input w-48 no-print" value={group} onChange={(e) => setGroup(e.target.value as WealthGroup)} aria-label="Gruppieren nach">
@@ -671,7 +671,7 @@ function Wealth({ f, g }: { f: ReportFilter; g: Granularity }) {
         <StackedAreaChart data={rows} keys={keys} onPick={(p) => showMoves(p)} />
         <p className="text-xs text-text-muted mt-2">Kredite zählen negativ. Grundlage sind die erfassten Kontostände und die Buchungen danach. Ein Klick in die Grafik oder auf einen Betrag in der Tabelle zeigt die Kontobewegungen dieses Zeitraums.</p>
       </section>
-      <section className="card p-4 overflow-x-auto">
+      <section className="card p-5 overflow-x-auto">
         <table className="w-full text-sm min-w-[640px]">
           <thead className="text-xs text-text-muted"><tr><th className="text-left py-1">Zeitraum</th>{keys.map((k) => <th key={k} className="text-right px-2">{k}</th>)}<th className="text-right">Gesamt</th></tr></thead>
           <tbody className="divide-y divide-border">
@@ -703,7 +703,7 @@ function Audit({ f }: { f: ReportFilter }) {
     rows: rows.map((r) => [r.name, r.owner ?? '', eur(r.start), eur(r.income), eur(r.expense), eur(r.transfers), eur(r.end), eur(r.gap)]),
   });
   return (
-    <section className="card p-4 overflow-x-auto">
+    <section className="card p-5 overflow-x-auto">
       <p className="text-sm text-text-muted mb-3">Je Konto: Stand vor dem Zeitraum, Bewegungen und Stand am Ende. Die letzte Spalte zeigt Veränderungen, die nur aus erfassten Kontoständen stammen. Bei Konten mit vollständig importierten Umsätzen sollte dort 0 € stehen.</p>
       <table className="w-full text-sm min-w-[760px]">
         <thead className="text-xs text-text-muted"><tr><th className="text-left py-1">Konto</th><th className="text-right">Anfang</th><th className="text-right">Einnahmen</th><th className="text-right">Ausgaben</th><th className="text-right">Umbuchungen</th><th className="text-right">Ende</th><th className="text-right">Nicht erklärt</th></tr></thead>

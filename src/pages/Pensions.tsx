@@ -24,7 +24,7 @@ export default function Pensions() {
             {persons.map((p) => {
               const r = rows.filter((x) => (x.person ?? '') === p);
               return (
-                <div key={p} className="card p-4">
+                <div key={p} className="card p-5">
                   <div className="text-xs text-text-muted">{p || 'Ohne Person'}</div>
                   <div className="text-xl font-semibold mt-1"><Money cents={r.reduce((s, x) => s + (x.monthly_pension ?? 0), 0)} colored={false} /> <span className="text-sm font-normal text-text-muted">Rente/Monat</span></div>
                   <div className="text-sm text-text-muted"><Money cents={r.reduce((s, x) => s + (x.lump_sum ?? 0), 0)} colored={false} /> als Einmalbetrag</div>

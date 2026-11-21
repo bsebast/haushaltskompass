@@ -1,7 +1,8 @@
 import { DrillProvider } from './DrillDown';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText, Landmark, Umbrella, TrendingUp, Package } from 'lucide-react';
+import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText, Landmark, Umbrella, TrendingUp, Package, Sun, Moon, X } from 'lucide-react';
+import { useTheme } from '../lib/theme';
 import { useBookCtx } from '../state';
 import TxDialog, { type TxMode } from './TxDialog';
 import type { Transaction } from '../db/types';
@@ -10,21 +11,55 @@ interface TxCtx { openNew: (mode?: TxMode, accountId?: string | null) => void; o
 const TxContext = createContext<TxCtx>({ openNew: () => {}, openEdit: () => {} });
 export const useTxDialog = () => useContext(TxContext);
 
-const NAV = [
-  { to: '/', label: 'Übersicht', icon: LayoutDashboard, end: true },
-  { to: '/buchungen', label: 'Buchungen', icon: ListOrdered },
-  { to: '/konten', label: 'Konten', icon: Wallet },
-  { to: '/vertraege', label: 'Verträge', icon: FileText },
-  { to: '/vermoegen', label: 'Vermögen', icon: Landmark },
-  { to: '/vorsorge', label: 'Vorsorge', icon: Umbrella },
-  { to: '/inventar', label: 'Inventar', icon: Package },
-  { to: '/budgets', label: 'Budgets', icon: Target },
-  { to: '/prognose', label: 'Prognose', icon: TrendingUp },
-  { to: '/auswertungen', label: 'Auswertungen', icon: BarChart3 },
-  { to: '/kategorien', label: 'Kategorien', icon: Tags },
-  { to: '/regeln', label: 'Regeln', icon: Wand2 },
-  { to: '/einstellungen', label: 'Einstellungen', icon: Settings },
+const NAV: { title?: string; items: { to: string; label: string; icon: typeof Compass; end?: boolean }[] }[] = [
+  { items: [
+    { to: '/', label: 'Übersicht', icon: LayoutDashboard, end: true },
+    { to: '/buchungen', label: 'Buchungen', icon: ListOrdered },
+    { to: '/konten', label: 'Konten', icon: Wallet },
+  ] },
+  { title: 'Besitz & Verträge', items: [
+    { to: '/vertraege', label: 'Verträge', icon: FileText },
+    { to: '/vermoegen', label: 'Vermögen', icon: Landmark },
+    { to: '/vorsorge', label: 'Vorsorge', icon: Umbrella },
+    { to: '/inventar', label: 'Inventar', icon: Package },
+  ] },
+  { title: 'Planen & Auswerten', items: [
+    { to: '/budgets', label: 'Budgets', icon: Target },
+    { to: '/prognose', label: 'Prognose', icon: TrendingUp },
+    { to: '/auswertungen', label: 'Auswertungen', icon: BarChart3 },
+  ] },
+  { title: 'Verwaltung', items: [
+    { to: '/kategorien', label: 'Kategorien', icon: Tags },
+    { to: '/regeln', label: 'Regeln', icon: Wand2 },
+    { to: '/einstellungen', label: 'Einstellungen', icon: Settings },
+  ] },
 ];
+
+function Logo() {
+  return (
+    <span className="grid place-items-center w-8 h-8 rounded-lg bg-accent text-on-accent shadow-sm" aria-hidden>
+      <Compass size={18} strokeWidth={2.25} />
+    </span>
+  );
+}
+
+/** Umschalter hell/dunkel; die Wahl wird gespeichert (zurück auf „wie System“ unter Einstellungen). */
+export function ThemeToggle() {
+  const { theme, toggle } = useTheme();
+  const dark = theme === 'dark';
+  const label = dark ? 'Zu hellem Modus wechseln' : 'Zu dunklem Modus wechseln';
+  const onClick = () => {
+    const root = document.documentElement;
+    root.classList.add('theme-anim');
+    toggle();
+    window.setTimeout(() => root.classList.remove('theme-anim'), 250);
+  };
+  return (
+    <button type="button" className="btn-ghost w-9 px-0 rounded-full border border-border bg-surface" onClick={onClick} aria-label={label} title={label}>
+      {dark ? <Sun size={17} aria-hidden /> : <Moon size={17} aria-hidden />}
+    </button>
+  );
+}
 
 export default function Layout() {
   const { book, saving } = useBookCtx();
@@ -48,36 +83,48 @@ export default function Layout() {
 
   return (
     <TxContext.Provider value={{ openNew, openEdit }}>
-      <div className="min-h-full lg:grid lg:grid-cols-[232px_1fr]">
-        <aside className={`${navOpen ? 'block' : 'hidden'} lg:block fixed lg:sticky top-0 z-40 lg:z-auto h-screen w-[232px] bg-surface border-r border-border`}>
-          <div className="h-14 flex items-center gap-2 px-4 border-b border-border">
-            <Compass className="text-accent" size={22} aria-hidden />
-            <span className="font-semibold">Haushaltskompass</span>
+      <div className="min-h-full lg:grid lg:grid-cols-[248px_1fr]">
+        <aside className={`${navOpen ? 'flex' : 'hidden'} lg:flex flex-col fixed lg:sticky top-0 z-40 lg:z-auto h-screen w-[248px] bg-surface border-r border-border`}>
+          <div className="h-16 flex items-center gap-2.5 px-5 shrink-0">
+            <Logo />
+            <span className="font-semibold tracking-tight">Haushaltskompass</span>
+            <button className="btn-ghost w-8 h-8 px-0 ml-auto lg:hidden" aria-label="Menü schließen" onClick={() => setNavOpen(false)}><X size={18} /></button>
           </div>
-          <nav className="p-2 space-y-0.5" aria-label="Hauptnavigation">
-            {NAV.map(({ to, label, icon: Icon, end }) => (
-              <NavLink key={to} to={to} end={end} onClick={() => setNavOpen(false)}
-                className={({ isActive }) => `flex items-center gap-3 px-3 h-9 rounded-md text-sm ${isActive ? 'bg-accent-soft text-accent font-medium' : 'text-text hover:bg-surface-2'}`}>
-                <Icon size={18} aria-hidden />{label}
-              </NavLink>
+          <nav className="flex-1 overflow-y-auto px-3 pb-4" aria-label="Hauptnavigation">
+            {NAV.map((g, gi) => (
+              <div key={gi} className={gi ? 'mt-5' : 'mt-1'}>
+                {g.title && <div className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted/80">{g.title}</div>}
+                <div className="space-y-0.5">
+                  {g.items.map(({ to, label, icon: Icon, end }) => (
+                    <NavLink key={to} to={to} end={end} onClick={() => setNavOpen(false)}
+                      className={({ isActive }) => `group flex items-center gap-3 px-3 h-9 rounded-lg text-sm transition-colors ${isActive ? 'bg-accent-soft text-accent font-semibold' : 'text-text-muted hover:text-text hover:bg-surface-2'}`}>
+                      <Icon size={18} aria-hidden className="shrink-0" />{label}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
-          <div className="absolute bottom-0 inset-x-0 p-4 text-xs text-text-muted border-t border-border">
-            <div className="truncate" title={name}>{name}</div>
-            <div>{saving ? 'Wird gespeichert …' : 'Lokal gespeichert'}</div>
+          <div className="m-3 mt-0 p-3 rounded-lg bg-surface-2 text-xs shrink-0">
+            <div className="truncate font-medium text-text" title={name}>{name}</div>
+            <div className="flex items-center gap-1.5 text-text-muted mt-0.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${saving ? 'bg-warning animate-pulse' : 'bg-success'}`} aria-hidden />
+              {saving ? 'Wird gespeichert …' : 'Lokal gespeichert'}
+            </div>
           </div>
         </aside>
-        {navOpen && <div className="fixed inset-0 z-30 bg-text/20 lg:hidden" onClick={() => setNavOpen(false)} />}
+        {navOpen && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setNavOpen(false)} />}
         <div className="min-w-0">
-          <header className="sticky top-0 z-20 h-14 bg-bg/90 backdrop-blur border-b border-border flex items-center gap-3 px-4 lg:px-8">
+          <header className="sticky top-0 z-20 h-16 bg-bg/80 backdrop-blur-md border-b border-border/70 flex items-center gap-3 px-4 lg:px-10">
             <button className="btn-ghost w-9 px-0 lg:hidden" aria-label="Menü" onClick={() => setNavOpen(true)}><Menu size={20} /></button>
-            <span className="lg:hidden font-semibold">Haushaltskompass</span>
+            <span className="lg:hidden flex items-center gap-2 font-semibold"><Logo /><span className="hidden sm:inline">Haushaltskompass</span></span>
             <div className="ml-auto flex items-center gap-2">
-              <span className="hidden md:inline text-xs text-text-muted">Taste <kbd className="px-1 border border-border rounded">N</kbd> für neue Buchung</span>
-              <button className="btn-primary" onClick={() => openNew()}><Plus size={16} />Neue Buchung</button>
+              <span className="hidden md:inline text-xs text-text-muted mr-1">Taste <kbd className="px-1.5 py-0.5 border border-border rounded bg-surface font-sans">N</kbd> für neue Buchung</span>
+              <ThemeToggle />
+              <button className="btn-primary rounded-full px-4" onClick={() => openNew()}><Plus size={16} />Neue Buchung</button>
             </div>
           </header>
-          <main className="px-4 lg:px-8 py-6 max-w-[1280px]">
+          <main className="px-4 lg:px-10 py-6 lg:py-8 max-w-[1400px]">
             <DrillProvider><Outlet /></DrillProvider>
           </main>
         </div>

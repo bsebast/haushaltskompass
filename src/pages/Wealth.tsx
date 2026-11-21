@@ -56,7 +56,7 @@ export default function Wealth() {
         </div>
       )}
       <div className="grid gap-4 lg:grid-cols-3 mb-4">
-        <section className="card p-4">
+        <section className="card p-5">
           <div className="text-xs text-text-muted">Gesamtvermögen {owner ?? ''}</div>
           <div className="text-3xl font-semibold mt-1"><Money cents={[...byType.values()].reduce((a, v) => a + v, 0)} /></div>
           <ul className="mt-3 space-y-1 text-sm">
@@ -69,7 +69,7 @@ export default function Wealth() {
             </ul>
           )}
         </section>
-        <section className="card p-4 lg:col-span-2">
+        <section className="card p-5 lg:col-span-2">
           <h2 className="text-sm font-semibold mb-3">Verlauf (Monatsende)</h2>
           <BalanceChart data={trend} height={240} />
         </section>

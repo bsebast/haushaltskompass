@@ -1,18 +1,62 @@
-/* generiert aus replica/design/tokens.json */
+/* Farbrollen für Haushaltskompass (Werte als „R G B“, siehe replica/design/tokens.json).
+   Hell ist Standard; Dunkel gilt bei data-theme="dark" auf <html> (gesetzt in index.html bzw. src/lib/theme.ts). */
 :root {
-  --c-bg: 251 250 247;
+  color-scheme: light;
+  --c-bg: 247 246 242;
   --c-surface: 255 255 255;
-  --c-surface-2: 242 239 232;
-  --c-border: 226 221 210;
+  --c-surface-2: 241 239 233;
+  --c-border: 230 226 217;
   --c-border-input: 138 132 120;
-  --c-text: 29 35 33;
-  --c-text-muted: 92 99 95;
-  --c-accent: 15 107 99;
-  --c-accent-soft: 220 239 235;
+  --c-text: 25 31 29;
+  --c-text-muted: 88 96 92;
+  --c-accent: 13 110 101;
+  --c-accent-soft: 222 240 236;
   --c-on-accent: 255 255 255;
-  --c-income: 28 122 69;
-  --c-expense: 180 54 31;
+  --c-income: 24 122 70;
+  --c-expense: 184 52 30;
   --c-danger: 180 35 24;
   --c-warning: 138 90 0;
-  --c-success: 28 122 69;
+  --c-success: 24 122 70;
+  /* Serienfarben für Diagramme (feste Reihenfolge) */
+  --c-s1: 42 120 214;
+  --c-s2: 235 104 52;
+  --c-s3: 27 175 122;
+  --c-s4: 222 151 0;
+  --c-s5: 224 106 152;
+  --c-s6: 0 131 0;
+  --c-s7: 98 80 214;
+  --c-s8: 227 73 72;
+  --shadow-card: 0 1px 2px rgb(25 31 29 / .04), 0 4px 16px -4px rgb(25 31 29 / .08);
+  --shadow-pop: 0 12px 40px -8px rgb(25 31 29 / .25);
+  --flow-opacity: .35;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --c-bg: 14 19 20;
+  --c-surface: 22 28 30;
+  --c-surface-2: 31 39 41;
+  --c-border: 42 51 53;
+  --c-border-input: 108 120 117;
+  --c-text: 230 236 233;
+  --c-text-muted: 152 164 160;
+  --c-accent: 78 196 180;
+  --c-accent-soft: 24 58 55;
+  --c-on-accent: 6 30 27;
+  --c-income: 88 204 140;
+  --c-expense: 247 128 104;
+  --c-danger: 248 113 100;
+  --c-warning: 234 179 72;
+  --c-success: 88 204 140;
+  --c-s1: 92 160 240;
+  --c-s2: 246 135 88;
+  --c-s3: 52 200 146;
+  --c-s4: 240 183 50;
+  --c-s5: 238 136 178;
+  --c-s6: 98 190 90;
+  --c-s7: 150 132 245;
+  --c-s8: 242 112 110;
+  --shadow-card: 0 1px 2px rgb(0 0 0 / .3), 0 4px 16px -4px rgb(0 0 0 / .35);
+  --shadow-pop: 0 16px 48px -8px rgb(0 0 0 / .6);
+  --flow-opacity: .55;
 }

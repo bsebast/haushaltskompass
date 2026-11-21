@@ -15,6 +15,15 @@ const chartPick = <T,>(data: T[], cb?: (row: T) => void) => (cb ? {
 } : {});
 export type ChartPick<K extends string> = (period: string, series: K) => void;
 
+/** Tooltip im Look der App, in beiden Farbschemata lesbar. */
+const tip = {
+  contentStyle: { background: css('surface'), border: `1px solid ${css('border')}`, borderRadius: 10, boxShadow: 'var(--shadow-pop)', fontSize: 12, color: css('text') },
+  labelStyle: { color: css('text'), fontWeight: 600, marginBottom: 2 },
+  itemStyle: { color: css('text') },
+  cursor: { fill: css('text'), fillOpacity: 0.05, stroke: 'none' },
+};
+const legend = { wrapperStyle: { fontSize: 12, color: css('text-muted') } };
+
 const short = (v: number) => `${Math.round(v / 100).toLocaleString('de-DE')} €`;
 
 export function IncomeExpenseChart({ data, height = 260, onPick }: { data: { month: string; income: number; expense: number }[]; height?: number; onPick?: ChartPick<'income' | 'expense'> }) {
@@ -24,8 +33,8 @@ export function IncomeExpenseChart({ data, height = 260, onPick }: { data: { mon
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="month" tickFormatter={(m) => monthLabel(m)} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={72} />
-        <Tooltip formatter={euro} labelFormatter={monthTip} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Tooltip {...tip} formatter={euro} labelFormatter={monthTip} />
+        <Legend {...legend} />
         <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} {...barPick(data, onPick && ((r) => onPick(r.month, 'income')))} />
         <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" fill={css('expense')} radius={[4, 4, 0, 0]} {...barPick(data, onPick && ((r) => onPick(r.month, 'expense')))} />
       </BarChart>
@@ -46,7 +55,7 @@ export function BalanceChart({ data, height = 220, onPick }: { data: { month: st
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="month" tickFormatter={(m) => monthLabel(m)} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
-        <Tooltip formatter={euro} labelFormatter={monthTip} />
+        <Tooltip {...tip} formatter={euro} labelFormatter={monthTip} />
         <Area isAnimationActive={false} type="monotone" dataKey="balance" name="Kontostand" stroke={css('accent')} strokeWidth={2} fill="url(#bal)" />
       </AreaChart>
     </ResponsiveContainer>
@@ -61,14 +70,14 @@ export function DonutChart<T extends { name: string; amount: number; color: stri
           onClick={onPick ? (_, i) => data[i] && onPick(data[i]) : undefined}>
           {data.map((d, i) => <Cell key={i} fill={d.color} cursor={onPick ? 'pointer' : undefined} />)}
         </Pie>
-        <Tooltip formatter={euro} />
+        <Tooltip {...tip} formatter={euro} />
       </PieChart>
     </ResponsiveContainer>
   );
 }
 
 /** Feste Reihenfolge der Serienfarben (nie zyklisch; ab der 8. Serie wird zu „Weitere“ zusammengefasst). */
-export const SERIES = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'];
+export const SERIES = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => css(`s${i}`)); // hell/dunkel über CSS-Variablen
 
 const periodTick = (k: unknown) => {
   const s = String(k ?? '');
@@ -86,8 +95,8 @@ export function CashflowChart({ data, height = 280, onPick }: { data: { period: 
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="period" tickFormatter={periodTick} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
-        <Tooltip formatter={euro} labelFormatter={periodTick} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Tooltip {...tip} formatter={euro} labelFormatter={periodTick} />
+        <Legend {...legend} />
         <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} {...pick('income')} />
         <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" stackId="out" fill={css('expense')} radius={hasSaving ? undefined : [4, 4, 0, 0]} {...pick('expense')} />
         {hasSaving && <Bar isAnimationActive={false} dataKey="saving" name="Sparen" stackId="out" fill={SERIES[0]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} {...pick('saving')} />}
@@ -104,8 +113,8 @@ export function FixVarChart({ data, height = 260, onPick }: { data: { period: st
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="period" tickFormatter={periodTick} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
-        <Tooltip formatter={euro} labelFormatter={periodTick} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Tooltip {...tip} formatter={euro} labelFormatter={periodTick} />
+        <Legend {...legend} />
         <Bar isAnimationActive={false} dataKey="fixed" name="Fixkosten (Verträge)" stackId="a" fill={SERIES[6]} stroke={css('surface')} strokeWidth={2} {...pick('fixed')} />
         <Bar isAnimationActive={false} dataKey="variable" name="Variable Ausgaben" stackId="a" fill={SERIES[1]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} {...pick('variable')} />
       </BarChart>
@@ -120,8 +129,8 @@ export function StackedAreaChart({ data, keys, height = 300, onPick }: { data: R
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="period" tickFormatter={periodTick} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={88} />
-        <Tooltip formatter={euro} labelFormatter={periodTick} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Tooltip {...tip} formatter={euro} labelFormatter={periodTick} />
+        <Legend {...legend} />
         {keys.map((k, i) => (
           <Area key={k} isAnimationActive={false} type="monotone" dataKey={k} name={k} stackId="w"
             stroke={SERIES[i % SERIES.length]} strokeWidth={2} fill={SERIES[i % SERIES.length]} fillOpacity={0.35} />
@@ -141,8 +150,8 @@ export function ForecastChart({ data, series, floor, height = 300, onPick }: {
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="month" tickFormatter={(m) => monthLabel(m)} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={88} />
-        <Tooltip formatter={euro} labelFormatter={monthTip} />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Tooltip {...tip} formatter={euro} labelFormatter={monthTip} />
+        <Legend {...legend} />
         <ReferenceLine y={0} stroke={css('text-muted')} strokeOpacity={0.5} />
         {floor != null && <ReferenceLine y={floor} stroke={css('danger')} strokeDasharray="4 4" label={{ value: 'Warngrenze', fontSize: 11, fill: css('danger'), position: 'insideTopLeft' }} />}
         {series.map((s, i) => (
@@ -181,17 +190,17 @@ export function FlowChart<N extends FlowChartNode>({ nodes, links, height = 420,
     const l = links[p.index];
     const target = l ? nodes[l.target] : undefined;
     const source = l ? nodes[l.source] : undefined;
-    const color = (target?.side === 'out' ? target : source)?.color ?? '#8a8478';
+    const color = (target?.side === 'out' ? target : source)?.color ?? css('text-muted');
     return (
       <path d={`M${p.sourceX},${p.sourceY} C${p.sourceControlX},${p.sourceY} ${p.targetControlX},${p.targetY} ${p.targetX},${p.targetY}`}
-        fill="none" stroke={color} strokeOpacity={0.35} strokeWidth={Math.max(1, p.linkWidth)} />
+        fill="none" stroke={color} style={{ strokeOpacity: 'var(--flow-opacity)' }} strokeWidth={Math.max(1, p.linkWidth)} />
     );
   };
   return (
     <ResponsiveContainer width="100%" height={height}>
       <Sankey data={{ nodes: nodes.map((n) => ({ name: n.name })), links }} nodeWidth={12} nodePadding={14} sort={false} iterations={0}
         margin={{ top: 24, right: 200, bottom: 8, left: 200 }} node={Node} link={Link}>
-        <Tooltip formatter={euro} />
+        <Tooltip {...tip} formatter={euro} />
       </Sankey>
     </ResponsiveContainer>
   );
