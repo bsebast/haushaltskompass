@@ -131,3 +131,35 @@ describe('Auswertungen', () => {
     expect(() => saveView(b, { name: ' ', query: '' })).toThrow();
   });
 });
+
+describe('Detailansicht (Klick auf Werte)', () => {
+  it('Zeilen tragen die Buchungs-ID, Summen je Kategorie und Monat lassen sich zurückverfolgen', async () => {
+    const { b, cat } = await setup();
+    const { listTransactions } = await import('../src/db/repo');
+    const { partsFromLines } = await import('../src/components/DrillDown');
+    const lines = reportLines(b, { from: '2026-01-01', to: '2026-12-31' });
+    const strom = lines.filter((l) => l.category_id === cat('Strom') && l.month === '2026-02');
+    const parts = partsFromLines(strom);
+    expect(parts).toHaveLength(1);
+    const [t] = listTransactions(b, { ids: parts.map((p) => p.id) });
+    expect(t.payee).toBe('Stromanbieter');
+    expect(t.amount).toBe(-6500);
+    expect(listTransactions(b, { ids: [] })).toHaveLength(0);
+  });
+
+  it('Buchungen eines Vertrags und mehrerer Konten', async () => {
+    const { b, giro, spar } = await setup();
+    const { listTransactions } = await import('../src/db/repo');
+    const id = b.value<string>("select recurring_id from transactions where recurring_id is not null limit 1")!;
+    expect(listTransactions(b, { recurringId: id, from: '2026-01-01', to: '2026-12-31' })).toHaveLength(2);
+    expect(listTransactions(b, { accountIds: [spar], from: '2026-02-01', to: '2026-02-28' })).toHaveLength(1);
+    expect(listTransactions(b, { accountIds: [giro, spar], kind: 'transfer' })).toHaveLength(2);
+  });
+
+  it('periodBounds liefert Anfang und Ende von Monat, Quartal und Jahr', async () => {
+    const { periodBounds } = await import('../src/db/analytics');
+    expect(periodBounds('2026-02')).toEqual({ from: '2026-02-01', to: '2026-02-28' });
+    expect(periodBounds('2026-Q2')).toEqual({ from: '2026-04-01', to: '2026-06-30' });
+    expect(periodBounds('2026')).toEqual({ from: '2026-01-01', to: '2026-12-31' });
+  });
+});

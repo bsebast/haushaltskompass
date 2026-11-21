@@ -22,7 +22,7 @@ npm run build      # statischer Build in dist/
 - Regeln zur automatischen Kategorisierung mit Trefferanzeige
 - Budgets je Kategorie (monatlich oder jährlich) mit Ampel und Prognose
 - Übersicht: Monatsrest mit Hochrechnung, Konten, Budgets, Saldenverlauf, Kategorien, Sparpotenzial
-- Auswertungen: Monat, Jahr, Monatsvergleich, Langzeit
+- Auswertungen: Monat, Jahr, Monatsvergleich, Langzeit. Ein Klick auf einen Betrag, Balken, Tortenstück oder Punkt zeigt die Buchungen dahinter
 - Verträge & Fixkosten: Rhythmus, Fälligkeit, Person, Ø pro Monat, CSV-Import (Spalten wie Vertrag; Vertragspartner; Zweck; Betrag; Rhythmus; Fälligkeit; Zahlart; Art; Kategorie; Bemerkung)
 - Konten nach Person mit Bank, Zinssatz und Freistellungsauftrag; Kontoarten auch Depot, Festgeld, Kredit
 - Kontostände zu Stichtagen (für Depots und Konten ohne Einzelbuchungen) und Vermögensverlauf

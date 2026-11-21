@@ -23,6 +23,8 @@ export interface ReportFilter {
 }
 
 export interface Line {
+  /** ID der Buchung (bei aufgeteilten Buchungen hat jede Teilzeile dieselbe ID) */
+  id: string;
   date: string;
   month: string;
   account_id: string;
@@ -61,8 +63,8 @@ export function reportLines(b: Book, f: ReportFilter): Line[] {
       p.push(`%${term}%`, `%${term}%`, `%${term}%`);
     }
   }
-  const rows = b.all<{ date: string; account_id: string; owner: string | null; category_id: string | null; amount: number; payee: string | null; recurring_id: string | null }>(
-    `select t.date, t.account_id, a.owner, coalesce(s.category_id, t.category_id) as category_id, coalesce(s.amount, t.amount) as amount, t.payee, t.recurring_id
+  const rows = b.all<{ id: string; date: string; account_id: string; owner: string | null; category_id: string | null; amount: number; payee: string | null; recurring_id: string | null }>(
+    `select t.id, t.date, t.account_id, a.owner, coalesce(s.category_id, t.category_id) as category_id, coalesce(s.amount, t.amount) as amount, t.payee, t.recurring_id
      from transactions t join accounts a on a.id = t.account_id left join splits s on s.transaction_id = t.id
      where ${where.join(' and ')} order by t.date`,
     p,
@@ -75,7 +77,7 @@ export function reportLines(b: Book, f: ReportFilter): Line[] {
     .filter((r) => !scope || (r.category_id && scope.has(r.category_id)))
     .filter((r) => !f.hideUncategorized || r.category_id)
     .map((r) => ({
-      date: r.date, month: r.date.slice(0, 7), account_id: r.account_id, owner: r.owner, category_id: r.category_id,
+      id: r.id, date: r.date, month: r.date.slice(0, 7), account_id: r.account_id, owner: r.owner, category_id: r.category_id,
       root_id: r.category_id ? roots.get(r.category_id) ?? r.category_id : null, amount: r.amount, payee: r.payee,
       fixed: !!r.recurring_id,
       kind: r.amount > 0 ? 'income' : r.category_id && saving.has(r.category_id) ? 'saving' : 'expense',
@@ -273,20 +275,33 @@ export type WealthGroup = 'type' | 'owner' | 'account';
 
 export interface WealthSeries { keys: string[]; rows: Record<string, number | string>[]; depotValue: number; depotAsOf: string | null }
 
+/** Erster und letzter Tag einer Periode (Monat 2026-03, Quartal 2026-Q1 oder Jahr 2026). */
+export function periodBounds(k: string): { from: string; to: string } {
+  if (/^\d{4}$/.test(k)) return { from: `${k}-01-01`, to: `${k}-12-31` };
+  if (k.includes('-Q')) {
+    const q = Number(k.slice(6));
+    const y = k.slice(0, 4);
+    return { from: monthRange(`${y}-${String(q * 3 - 2).padStart(2, '0')}`).from, to: monthRange(`${y}-${String(q * 3).padStart(2, '0')}`).to };
+  }
+  return monthRange(k);
+}
+
+/** Die Konten der Vermögensauswertung mit ihrem Gruppenschlüssel (Kontoart, Person oder Kontoname). */
+export function wealthAccounts(b: Book, f: ReportFilter, group: WealthGroup, labels: { type: Record<string, string> }) {
+  let accts = b.all<{ id: string; name: string; type: string; owner: string | null }>('select id, name, type, owner from accounts where external = 0');
+  if (f.accountIds?.length) accts = accts.filter((a) => f.accountIds!.includes(a.id));
+  if (f.owners?.length) accts = accts.filter((a) => f.owners!.includes(a.owner ?? ''));
+  return accts.map((a) => ({ ...a, key: group === 'type' ? labels.type[a.type] ?? a.type : group === 'owner' ? a.owner || 'Ohne Inhaber' : a.name }));
+}
+
 /** Kontostände am Periodenende, gruppiert nach Kontoart, Person oder Konto. Depotwerte aus den Depotpositionen (letzter Stand). */
 export function wealthSeries(b: Book, fIn: ReportFilter, g: Granularity, group: WealthGroup, labels: { type: Record<string, string> }): WealthSeries {
   const f = { ...fIn, to: fIn.to > today() ? today() : fIn.to };
   const periods = periodsBetween(f.from, f.to, g);
-  const ends = periods.map((k) => {
-    if (g === 'year') return `${k}-12-31`;
-    if (g === 'quarter') { const q = Number(k.slice(6)); return monthRange(`${k.slice(0, 4)}-${String(q * 3).padStart(2, '0')}`).to; }
-    return monthRange(k).to;
-  }).map((d) => (d > f.to ? f.to : d));
-  let accts = b.all<{ id: string; name: string; type: string; owner: string | null }>('select id, name, type, owner from accounts where external = 0');
-  if (f.accountIds?.length) accts = accts.filter((a) => f.accountIds!.includes(a.id));
-  if (f.owners?.length) accts = accts.filter((a) => f.owners!.includes(a.owner ?? ''));
+  const ends = periods.map((k) => periodBounds(k).to).map((d) => (d > f.to ? f.to : d));
+  const accts = wealthAccounts(b, f, group, labels);
   const per = balancesAt(b, ends, accts.map((a) => a.id));
-  const keyOf = (a: (typeof accts)[number]) => (group === 'type' ? labels.type[a.type] ?? a.type : group === 'owner' ? a.owner || 'Ohne Inhaber' : a.name);
+  const keyOf = (a: (typeof accts)[number]) => a.key;
   const keys = [...new Set(accts.map(keyOf))];
   const rows = periods.map((k, i) => {
     const r: Record<string, number | string> = { period: k };

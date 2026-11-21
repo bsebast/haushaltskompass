@@ -1,3 +1,4 @@
+import { DrillProvider } from './DrillDown';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText, Landmark, Umbrella } from 'lucide-react';
@@ -75,7 +76,7 @@ export default function Layout() {
             </div>
           </header>
           <main className="px-4 lg:px-8 py-6 max-w-[1280px]">
-            <Outlet />
+            <DrillProvider><Outlet /></DrillProvider>
           </main>
         </div>
       </div>

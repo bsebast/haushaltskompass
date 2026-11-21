@@ -7,6 +7,8 @@ import { monthLeft, balanceTrend, budgetStatus, categoryTotals, monthlyTotals, s
 import { currentMonth, addMonths, monthRange, monthLabel, formatDate } from '../lib/dates';
 import { ACCOUNT_TYPES } from '../db/types';
 import { useTxDialog } from '../components/Layout';
+import { DrillCell, useDrill, partsFromLines, partsFromTx } from '../components/DrillDown';
+import { reportLines } from '../db/analytics';
 import { listContracts, perMonth, upcoming } from '../db/contracts';
 
 function Card({ title, link, children, className = '' }: { title: string; link?: [string, string]; children: React.ReactNode; className?: string }) {
@@ -36,6 +38,18 @@ export default function Dashboard() {
   const contracts = useQuery((b) => listContracts(b));
   const { openNew } = useTxDialog();
   const total = accounts.filter((a) => !a.external).reduce((s, a) => s + a.balance, 0);
+  const drill = useDrill();
+  const showMonth = (month: string, kind: 'income' | 'expense', root?: { id: string | null; name: string }) => {
+    const mr = monthRange(month);
+    drill({
+      title: `${kind === 'income' ? 'Einnahmen' : 'Ausgaben'}${root ? ` · ${root.name}` : ''} · ${monthLabel(month, true)}`,
+      load: (b) => partsFromLines(reportLines(b, mr).filter((l) => (kind === 'income') === (l.amount > 0) && (!root || l.root_id === root.id))),
+    });
+  };
+  const showMoves = (month: string) => {
+    const mr = monthRange(month);
+    drill({ title: `Kontobewegungen · ${monthLabel(month, true)}`, load: (b) => partsFromTx(b, { ...mr, accountIds: listAccounts(b, true).filter((a) => !a.external).map((a) => a.id) }) });
+  };
 
   if (!recent.length && !contracts.length) {
     return (
@@ -51,8 +65,8 @@ export default function Dashboard() {
       <Card title={`Was bleibt im ${monthLabel(m, true)}`} link={['/auswertungen', 'Auswertungen']}>
         <div className="text-3xl font-semibold"><Money cents={left.left} /></div>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-          <div><dt className="text-text-muted text-xs">Einnahmen</dt><dd><Money cents={left.income} /></dd></div>
-          <div><dt className="text-text-muted text-xs">Ausgaben</dt><dd><Money cents={-left.expense} /></dd></div>
+          <div><dt className="text-text-muted text-xs">Einnahmen</dt><dd><DrillCell onClick={() => showMonth(m, 'income')}><Money cents={left.income} /></DrillCell></dd></div>
+          <div><dt className="text-text-muted text-xs">Ausgaben</dt><dd><DrillCell onClick={() => showMonth(m, 'expense')}><Money cents={-left.expense} /></DrillCell></dd></div>
         </dl>
         {left.projectedLeft !== null && (
           <p className="text-xs text-text-muted mt-3">Hochrechnung bis Monatsende: <Money cents={left.projectedLeft} colored={false} className="font-medium text-text" /></p>
@@ -89,17 +103,17 @@ export default function Dashboard() {
       </Card>
 
       <Card title="Kontostand der letzten 12 Monate" className="md:col-span-2">
-        <BalanceChart data={trend} />
+        <BalanceChart data={trend} onPick={showMoves} />
       </Card>
 
       <Card title="Ausgaben nach Kategorie" link={['/auswertungen', 'Details']}>
         {topCats.length === 0 ? <p className="text-sm text-text-muted">Diesen Monat noch keine Ausgaben.</p> : (
           <>
-            <DonutChart data={topCats.slice(0, 8)} height={160} />
+            <DonutChart data={topCats.slice(0, 8)} height={160} onPick={(c) => showMonth(m, 'expense', { id: c.category_id, name: c.name })} />
             <ul className="mt-2 space-y-1 text-sm">
               {topCats.slice(0, 5).map((c) => (
                 <li key={c.category_id ?? 'none'} className="flex items-center gap-2">
-                  <Dot color={c.color} /><span className="flex-1 truncate">{c.name}</span>
+                  <Dot color={c.color} /><span className="flex-1 truncate"><DrillCell onClick={() => showMonth(m, 'expense', { id: c.category_id, name: c.name })}>{c.name}</DrillCell></span>
                   <span className="text-text-muted text-xs">{Math.round(c.share * 100)} %</span>
                   <Money cents={c.amount} colored={false} />
                 </li>
@@ -110,7 +124,7 @@ export default function Dashboard() {
       </Card>
 
       <Card title="Einnahmen und Ausgaben" className="md:col-span-2">
-        <IncomeExpenseChart data={totals} height={220} />
+        <IncomeExpenseChart data={totals} height={220} onPick={(month, k) => showMonth(month, k)} />
       </Card>
 
       <Card title="Sparpotenzial">

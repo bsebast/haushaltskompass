@@ -35,7 +35,12 @@ export function Modal({ title, onClose, children, footer, wide }: {
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // nur der oberste Dialog schließt (z. B. Buchung über der Detailansicht einer Auswertung)
+      const open = document.querySelectorAll('[role="dialog"]');
+      if (open[open.length - 1] === ref.current) onClose();
+    };
     document.addEventListener('keydown', onKey);
     const first = ref.current?.querySelector<HTMLElement>('input, select, textarea, button:not([data-close])');
     first?.focus();

@@ -5,9 +5,18 @@ import { monthLabel } from '../lib/dates';
 const css = (n: string) => `rgb(var(--c-${n}))`;
 const euro = (v: unknown) => formatCents(Number(v ?? 0));
 const monthTip = (m: unknown) => monthLabel(String(m ?? ''), true);
+/** Klick auf einen Balken: liefert den Datensatz zum Index. */
+const barPick = <T,>(data: T[], cb?: (row: T) => void) => (cb ? { onClick: (_: unknown, i: number) => data[i] && cb(data[i]), cursor: 'pointer' } : {});
+/** Klick irgendwo in einem Diagramm mit Zeitachse: liefert den Datensatz unter dem Mauszeiger. */
+const chartPick = <T,>(data: T[], cb?: (row: T) => void) => (cb ? {
+  onClick: (st: { activeTooltipIndex?: unknown }) => { const i = Number(st?.activeTooltipIndex); if (Number.isInteger(i) && data[i]) cb(data[i]); },
+  style: { cursor: 'pointer' },
+} : {});
+export type ChartPick<K extends string> = (period: string, series: K) => void;
+
 const short = (v: number) => `${Math.round(v / 100).toLocaleString('de-DE')} €`;
 
-export function IncomeExpenseChart({ data, height = 260 }: { data: { month: string; income: number; expense: number }[]; height?: number }) {
+export function IncomeExpenseChart({ data, height = 260, onPick }: { data: { month: string; income: number; expense: number }[]; height?: number; onPick?: ChartPick<'income' | 'expense'> }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
@@ -16,17 +25,17 @@ export function IncomeExpenseChart({ data, height = 260 }: { data: { month: stri
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={72} />
         <Tooltip formatter={euro} labelFormatter={monthTip} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} />
-        <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" fill={css('expense')} radius={[4, 4, 0, 0]} />
+        <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} {...barPick(data, onPick && ((r) => onPick(r.month, 'income')))} />
+        <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" fill={css('expense')} radius={[4, 4, 0, 0]} {...barPick(data, onPick && ((r) => onPick(r.month, 'expense')))} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-export function BalanceChart({ data, height = 220 }: { data: { month: string; balance: number }[]; height?: number }) {
+export function BalanceChart({ data, height = 220, onPick }: { data: { month: string; balance: number }[]; height?: number; onPick?: (month: string) => void }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+      <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} {...chartPick(data, onPick && ((r) => onPick(r.month)))}>
         <defs>
           <linearGradient id="bal" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={css('accent')} stopOpacity={0.25} />
@@ -43,12 +52,13 @@ export function BalanceChart({ data, height = 220 }: { data: { month: string; ba
   );
 }
 
-export function DonutChart({ data, height = 220 }: { data: { name: string; amount: number; color: string }[]; height?: number }) {
+export function DonutChart<T extends { name: string; amount: number; color: string }>({ data, height = 220, onPick }: { data: T[]; height?: number; onPick?: (row: T) => void }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <PieChart>
-        <Pie isAnimationActive={false} data={data} dataKey="amount" nameKey="name" innerRadius="58%" outerRadius="90%" paddingAngle={1} stroke="none">
-          {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+        <Pie isAnimationActive={false} data={data} dataKey="amount" nameKey="name" innerRadius="58%" outerRadius="90%" paddingAngle={1} stroke="none"
+          onClick={onPick ? (_, i) => data[i] && onPick(data[i]) : undefined}>
+          {data.map((d, i) => <Cell key={i} fill={d.color} cursor={onPick ? 'pointer' : undefined} />)}
         </Pie>
         <Tooltip formatter={euro} />
       </PieChart>
@@ -66,7 +76,8 @@ const periodTick = (k: unknown) => {
   return monthLabel(s);
 };
 
-export function CashflowChart({ data, height = 280 }: { data: { period: string; income: number; expense: number; saving: number }[]; height?: number }) {
+export function CashflowChart({ data, height = 280, onPick }: { data: { period: string; income: number; expense: number; saving: number }[]; height?: number; onPick?: ChartPick<'income' | 'expense' | 'saving'> }) {
+  const pick = (k: 'income' | 'expense' | 'saving') => barPick(data, onPick && ((r) => onPick(r.period, k)));
   const hasSaving = data.some((d) => d.saving);
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -76,15 +87,16 @@ export function CashflowChart({ data, height = 280 }: { data: { period: string; 
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
         <Tooltip formatter={euro} labelFormatter={periodTick} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} />
-        <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" stackId="out" fill={css('expense')} radius={hasSaving ? undefined : [4, 4, 0, 0]} />
-        {hasSaving && <Bar isAnimationActive={false} dataKey="saving" name="Sparen" stackId="out" fill={SERIES[0]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} />}
+        <Bar isAnimationActive={false} dataKey="income" name="Einnahmen" fill={css('income')} radius={[4, 4, 0, 0]} {...pick('income')} />
+        <Bar isAnimationActive={false} dataKey="expense" name="Ausgaben" stackId="out" fill={css('expense')} radius={hasSaving ? undefined : [4, 4, 0, 0]} {...pick('expense')} />
+        {hasSaving && <Bar isAnimationActive={false} dataKey="saving" name="Sparen" stackId="out" fill={SERIES[0]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} {...pick('saving')} />}
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-export function FixVarChart({ data, height = 260 }: { data: { period: string; fixed: number; variable: number }[]; height?: number }) {
+export function FixVarChart({ data, height = 260, onPick }: { data: { period: string; fixed: number; variable: number }[]; height?: number; onPick?: ChartPick<'fixed' | 'variable'> }) {
+  const pick = (k: 'fixed' | 'variable') => barPick(data, onPick && ((r) => onPick(r.period, k)));
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
@@ -93,17 +105,17 @@ export function FixVarChart({ data, height = 260 }: { data: { period: string; fi
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={80} />
         <Tooltip formatter={euro} labelFormatter={periodTick} />
         <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar isAnimationActive={false} dataKey="fixed" name="Fixkosten (Verträge)" stackId="a" fill={SERIES[6]} stroke={css('surface')} strokeWidth={2} />
-        <Bar isAnimationActive={false} dataKey="variable" name="Variable Ausgaben" stackId="a" fill={SERIES[1]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} />
+        <Bar isAnimationActive={false} dataKey="fixed" name="Fixkosten (Verträge)" stackId="a" fill={SERIES[6]} stroke={css('surface')} strokeWidth={2} {...pick('fixed')} />
+        <Bar isAnimationActive={false} dataKey="variable" name="Variable Ausgaben" stackId="a" fill={SERIES[1]} radius={[4, 4, 0, 0]} stroke={css('surface')} strokeWidth={2} {...pick('variable')} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-export function StackedAreaChart({ data, keys, height = 300 }: { data: Record<string, number | string>[]; keys: string[]; height?: number }) {
+export function StackedAreaChart({ data, keys, height = 300, onPick }: { data: Record<string, number | string>[]; keys: string[]; height?: number; onPick?: (period: string) => void }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+      <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} {...chartPick(data, onPick && ((r) => onPick(String(r.period))))}>
         <CartesianGrid vertical={false} stroke={css('border')} />
         <XAxis dataKey="period" tickFormatter={periodTick} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} />
         <YAxis tickFormatter={short} tick={{ fontSize: 12, fill: css('text-muted') }} axisLine={false} tickLine={false} width={88} />

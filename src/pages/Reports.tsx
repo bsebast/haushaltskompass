@@ -5,11 +5,12 @@ import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Dot, ErrorNote } from '../components/ui';
 import CategorySelect from '../components/CategorySelect';
 import { CashflowChart, FixVarChart, StackedAreaChart, DonutChart, SERIES } from '../components/charts';
-import { listAccounts, listCategories } from '../db/repo';
+import { DrillCell, useDrill, partsFromLines, partsFromTx } from '../components/DrillDown';
+import { listAccounts, listCategories, descendantIds } from '../db/repo';
 import {
-  reportLines, periodsBetween, periodLabel, cashflow, sumCashflow, pivot, compareByRoot, shiftYear, topPayees,
+  reportLines, periodKey, periodBounds, wealthAccounts, periodsBetween, periodLabel, cashflow, sumCashflow, pivot, compareByRoot, shiftYear, topPayees,
   contractsPlanVsActual, wealthSeries, accountAudit, listViews, saveView, deleteView,
-  type Granularity, type ReportFilter, type WealthGroup,
+  type Granularity, type ReportFilter, type WealthGroup, type Line, type PivotRow,
 } from '../db/analytics';
 import { ACCOUNT_TYPES } from '../db/types';
 import { today, monthRange, currentMonth, addMonths, formatDate } from '../lib/dates';
@@ -217,12 +218,33 @@ function FilterBar({ state }: { state: ReturnType<typeof useReportState> }) {
   );
 }
 
+function ClickHint() {
+  return <p className="text-xs text-text-muted mt-1 no-print">Ein Klick auf einen Balken zeigt die Buchungen dazu.</p>;
+}
+
 /* ---------- Überblick: Cashflow und Sparquote ---------- */
 
 function Kpi({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return <div className="card p-4"><div className="text-xs text-text-muted">{label}</div><div className="text-xl font-semibold mt-1">{children}</div>{hint && <div className="text-xs text-text-muted mt-0.5">{hint}</div>}</div>;
 }
 const pct = (v: number | null) => (v === null ? '–' : `${Math.round(v * 100)} %`);
+
+/* ---------- Klick auf Werte: zugehörige Buchungen anzeigen ---------- */
+
+type Pred = (l: Line) => boolean;
+const rangeLabel = (f: ReportFilter) => `${formatDate(f.from)} – ${formatDate(f.to)}`;
+const inPeriod = (p: string, g: Granularity): Pred => (l) => periodKey(l.month, g) === p;
+const both = (...ps: Pred[]): Pred => (l) => ps.every((p) => p(l));
+const KIND_LABEL = { income: 'Einnahmen', expense: 'Ausgaben', saving: 'Sparen', fixed: 'Fixkosten', variable: 'Variable Ausgaben' } as const;
+
+/** Öffnet die Buchungen hinter einem Wert der Auswertung (gleiche Filter, zusätzlich eingeschränkt durch pred). */
+function useShowLines(f: ReportFilter) {
+  const drill = useDrill();
+  return (title: string, pred: Pred, opts: { f?: ReportFilter; period?: string } = {}) => {
+    const ff = opts.f ?? f;
+    drill({ title, subtitle: opts.period ? periodLabel(opts.period) : rangeLabel(ff), load: (b) => partsFromLines(reportLines(b, ff).filter(pred)) });
+  };
+}
 
 function Overview({ f, g }: { f: ReportFilter; g: Granularity }) {
   const lines = useQuery((b) => reportLines(b, f), [JSON.stringify(f)]);
@@ -232,6 +254,10 @@ function Overview({ f, g }: { f: ReportFilter; g: Granularity }) {
   const open = lines.filter((l) => !l.category_id);
   const openSum = open.reduce((a, l) => a + Math.abs(l.amount), 0);
   const months = Math.max(1, periodsBetween(f.from, f.to, 'month').length);
+  const show = useShowLines(f);
+  const showKind = (k: 'income' | 'expense' | 'saving', p?: string) =>
+    show(p ? `${KIND_LABEL[k]} · ${periodLabel(p)}` : KIND_LABEL[k], p ? both((l) => l.kind === k, inPeriod(p, g)) : (l) => l.kind === k, { period: p });
+  const showPeriod = (p?: string) => show(p ? `Alle Buchungen · ${periodLabel(p)}` : 'Alle Buchungen', p ? inPeriod(p, g) : () => true, { period: p });
   useExportTable({
     name: 'cashflow', head: ['Zeitraum', 'Einnahmen', 'Ausgaben', 'davon fix', 'Sparen', 'Rest', 'Sparquote'],
     rows: [...rows, sum].map((r) => [r.period === 'Summe' ? 'Summe' : periodLabel(r.period), eur(r.income), eur(r.expense), eur(r.fixed), eur(r.saving), eur(r.net), pct(r.rate)]),
@@ -239,19 +265,19 @@ function Overview({ f, g }: { f: ReportFilter; g: Granularity }) {
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
-        <Kpi label="Einnahmen" hint={`Ø ${formatCents(Math.round(sum.income / months))} im Monat`}><Money cents={sum.income} /></Kpi>
-        <Kpi label="Ausgaben" hint={`Ø ${formatCents(Math.round(sum.expense / months))} im Monat`}><Money cents={-sum.expense} /></Kpi>
-        <Kpi label="Gespart (Sparen & Anlegen)"><Money cents={sum.saving} colored={false} /></Kpi>
+        <Kpi label="Einnahmen" hint={`Ø ${formatCents(Math.round(sum.income / months))} im Monat`}><DrillCell onClick={() => showKind('income')}><Money cents={sum.income} /></DrillCell></Kpi>
+        <Kpi label="Ausgaben" hint={`Ø ${formatCents(Math.round(sum.expense / months))} im Monat`}><DrillCell onClick={() => showKind('expense')}><Money cents={-sum.expense} /></DrillCell></Kpi>
+        <Kpi label="Gespart (Sparen & Anlegen)"><DrillCell onClick={() => showKind('saving')}><Money cents={sum.saving} colored={false} /></DrillCell></Kpi>
         <Kpi label="Rest nach Sparen" hint="Einnahmen − Ausgaben − Gespartes"><Money cents={sum.net} /></Kpi>
         <Kpi label="Sparquote" hint="(Gespartes + Rest) ÷ Einnahmen">{pct(sum.rate)}</Kpi>
       </div>
       {open.length > 0 && !f.hideUncategorized && (
         <p className="text-sm mb-4 rounded-md border border-warning/40 bg-warning/5 px-3 py-2">
-          {open.length} Buchungen ({formatCents(openSum)}) haben noch keine Kategorie, oft Überweisungen zwischen eigenen Konten.
+          <DrillCell onClick={() => show('Ohne Kategorie', (l) => !l.category_id)} className="font-medium">{open.length} Buchungen ({formatCents(openSum)})</DrillCell> haben noch keine Kategorie, oft Überweisungen zwischen eigenen Konten.
           {' '}<Link className="text-accent hover:underline" to="/buchungen?zeitraum=all">Zuordnen oder als Umbuchung erfassen</Link>, damit Ausgaben und Sparquote stimmen.
         </p>
       )}
-      <section className="card p-4 mb-4"><h3 className="text-sm font-semibold mb-3">Einnahmen, Ausgaben und Sparen</h3><CashflowChart data={rows} /></section>
+      <section className="card p-4 mb-4"><h3 className="text-sm font-semibold mb-3">Einnahmen, Ausgaben und Sparen</h3><CashflowChart data={rows} onPick={(p, k) => showKind(k, p)} /><ClickHint /></section>
       <div className="grid gap-4 xl:grid-cols-2 mb-4">
         <Breakdown f={f} kind="expense" />
         <Breakdown f={f} kind="income" />
@@ -260,14 +286,19 @@ function Overview({ f, g }: { f: ReportFilter; g: Granularity }) {
         <table className="w-full text-sm min-w-[640px]">
           <thead className="text-xs text-text-muted"><tr><th className="text-left py-1">Zeitraum</th><th className="text-right">Einnahmen</th><th className="text-right">Ausgaben</th><th className="text-right">Sparen</th><th className="text-right">Rest</th><th className="text-right">Sparquote</th></tr></thead>
           <tbody className="divide-y divide-border">
-            {[...rows, sum].map((r) => (
-              <tr key={r.period} className={r.period === 'Summe' ? 'font-semibold' : ''}>
-                <td className="py-1.5">{r.period === 'Summe' ? 'Summe' : periodLabel(r.period)}</td>
-                <td className="text-right"><Money cents={r.income} /></td><td className="text-right"><Money cents={-r.expense} /></td>
-                <td className="text-right"><Money cents={r.saving} colored={false} /></td><td className="text-right"><Money cents={r.net} /></td>
-                <td className="text-right">{pct(r.rate)}</td>
-              </tr>
-            ))}
+            {[...rows, sum].map((r) => {
+              const p = r.period === 'Summe' ? undefined : r.period;
+              return (
+                <tr key={r.period} className={r.period === 'Summe' ? 'font-semibold' : ''}>
+                  <td className="py-1.5"><DrillCell onClick={() => showPeriod(p)}>{p ? periodLabel(p) : 'Summe'}</DrillCell></td>
+                  <td className="text-right"><DrillCell onClick={() => showKind('income', p)}><Money cents={r.income} /></DrillCell></td>
+                  <td className="text-right"><DrillCell onClick={() => showKind('expense', p)}><Money cents={-r.expense} /></DrillCell></td>
+                  <td className="text-right"><DrillCell onClick={() => showKind('saving', p)}><Money cents={r.saving} colored={false} /></DrillCell></td>
+                  <td className="text-right"><DrillCell onClick={() => showPeriod(p)}><Money cents={r.net} /></DrillCell></td>
+                  <td className="text-right">{pct(r.rate)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
@@ -287,18 +318,21 @@ function Breakdown({ f, kind }: { f: ReportFilter; kind: 'expense' | 'income' })
       return { id, name: c?.name ?? 'Ohne Kategorie', color: c?.color ?? '#8a8478', amount, share: amount / total };
     }).sort((a, b) => b.amount - a.amount);
   }, [lines, cats, kind]);
+  const show = useShowLines(f);
+  const pick = (r: { id: string | null; name: string }) =>
+    show(`${kind === 'expense' ? 'Ausgaben' : 'Einnahmen'} · ${r.name}`, (l) => (kind === 'income') === (l.amount > 0) && l.root_id === r.id);
   return (
     <section className="card p-4">
       <h3 className="text-sm font-semibold mb-3">{kind === 'expense' ? 'Ausgaben' : 'Einnahmen'} nach Kategorie</h3>
       {rows.length === 0 ? <p className="text-sm text-text-muted">Keine Daten in diesem Zeitraum.</p> : (
         <div className="grid sm:grid-cols-[180px_1fr] gap-4 items-center">
-          <DonutChart data={rows.slice(0, 10)} height={180} />
+          <DonutChart data={rows.slice(0, 10)} height={180} onPick={pick} />
           <table className="w-full text-sm"><tbody className="divide-y divide-border">
             {rows.slice(0, 10).map((r) => (
               <tr key={r.id ?? 'none'}>
-                <td className="py-1"><span className="inline-flex items-center gap-2"><Dot color={r.color} />{r.name}</span></td>
+                <td className="py-1"><DrillCell onClick={() => pick(r)}><span className="inline-flex items-center gap-2"><Dot color={r.color} />{r.name}</span></DrillCell></td>
                 <td className="py-1 text-right text-xs text-text-muted w-12">{Math.round(r.share * 100)} %</td>
-                <td className="py-1 text-right w-28"><Money cents={r.amount} colored={false} /></td>
+                <td className="py-1 text-right w-28"><DrillCell onClick={() => pick(r)}><Money cents={r.amount} colored={false} /></DrillCell></td>
               </tr>
             ))}
           </tbody></table>
@@ -322,6 +356,24 @@ function PivotView({ f, g }: { f: ReportFilter; g: Granularity }) {
   const grand = totals.reduce((a, v) => a + v, 0);
   const max = Math.max(1, ...rows.filter((r) => r.depth === 0 || !r.hasChildren).flatMap((r) => r.cells));
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const cats = useQuery(listCategories);
+  const show = useShowLines(f);
+  const kindOk: Pred = (l) => (kind === 'income' ? l.kind === 'income' : l.kind !== 'income');
+  // dieselbe Zuordnung wie in pivot(): Oberkategorien mit allen Unterkategorien, „(direkt)“ nur die Kategorie selbst
+  const rowPred = (r: PivotRow): Pred => {
+    if (r.id === null) return both(kindOk, (l) => !l.category_id);
+    if (r.id === '#other') {
+      const other = new Set(cats.filter((c) => c.kind !== kind).map((c) => c.id));
+      return both(kindOk, (l) => !!l.category_id && other.has(l.category_id));
+    }
+    if (r.id.endsWith('#own')) { const id = r.id.slice(0, -4); return both(kindOk, (l) => l.category_id === id); }
+    const ids = new Set(descendantIds(cats, r.id));
+    return both(kindOk, (l) => !!l.category_id && ids.has(l.category_id));
+  };
+  const label = kind === 'expense' ? 'Ausgaben' : 'Einnahmen';
+  const showCell = (r: PivotRow | null, p?: string) => show(
+    [r ? r.name : label, p && periodLabel(p)].filter(Boolean).join(' · '),
+    both(r ? rowPred(r) : kindOk, p ? inPeriod(p, g) : () => true), { period: p });
   useExportTable({
     name: 'kategorien', head: ['Kategorie', ...periods.map(periodLabel), 'Summe', 'Durchschnitt'],
     rows: [...rows.map((r) => [`${'  '.repeat(r.depth)}${r.name}`, ...r.cells.map(eur), eur(r.total), eur(r.avg)]), ['Summe', ...totals.map(eur), eur(grand), eur(Math.round(grand / periods.length))]],
@@ -336,7 +388,7 @@ function PivotView({ f, g }: { f: ReportFilter; g: Granularity }) {
         </div>
         <button className="text-sm text-accent hover:underline" onClick={() => setExpanded(new Set(rows.filter((r) => r.hasChildren && r.id).map((r) => r.id!)))}>Alle aufklappen</button>
         <button className="text-sm text-accent hover:underline" onClick={() => setExpanded(new Set())}>Alle zuklappen</button>
-        <span className="text-xs text-text-muted">Je dunkler das Feld, desto höher der Betrag. Sparen zählt hier zu den Ausgaben.</span>
+        <span className="text-xs text-text-muted">Je dunkler das Feld, desto höher der Betrag. Sparen zählt hier zu den Ausgaben. Ein Klick auf einen Betrag zeigt die Buchungen dazu.</span>
       </div>
       <div className="overflow-x-auto">
         <table className="text-sm w-full">
@@ -358,24 +410,24 @@ function PivotView({ f, g }: { f: ReportFilter; g: Granularity }) {
                       </button>
                     ) : <span className="w-[14px]" />}
                     <Dot color={r.color} />
-                    {r.id && !r.id.includes('#') ? <Link className="hover:underline" to={`/buchungen?kategorie=${r.id}`}>{r.name}</Link> : r.name}
+                    <DrillCell onClick={() => showCell(r)}>{r.name}</DrillCell>
                   </span>
                 </td>
                 {r.cells.map((v, i) => (
                   <td key={i} className="text-right px-2 tabular-nums whitespace-nowrap"
                     style={v && (!r.hasChildren || !expanded.has(r.id ?? '')) ? { background: `rgb(var(--c-accent) / ${(0.06 + 0.34 * (v / max)).toFixed(2)})` } : undefined}
                     title={`${r.name}, ${periodLabel(periods[i])}: ${formatCents(v)}`}>
-                    {v ? formatCents(v).replace(/,\d\d\s€$/, ' €') : <span className="text-text-muted">–</span>}
+                    {v ? <DrillCell onClick={() => showCell(r, periods[i])} label={`${r.name}, ${periodLabel(periods[i])}: Buchungen anzeigen`}>{formatCents(v).replace(/,\d\d\s€$/, ' €')}</DrillCell> : <span className="text-text-muted">–</span>}
                   </td>
                 ))}
-                <td className="text-right px-2 tabular-nums whitespace-nowrap"><Money cents={r.total} colored={false} /></td>
+                <td className="text-right px-2 tabular-nums whitespace-nowrap"><DrillCell onClick={() => showCell(r)}><Money cents={r.total} colored={false} /></DrillCell></td>
                 <td className="text-right pl-2 tabular-nums whitespace-nowrap text-text-muted">{formatCents(r.avg)}</td>
               </tr>
             ))}
             <tr className="font-semibold">
               <td className="py-1.5 sticky left-0 bg-surface">Summe</td>
-              {totals.map((v, i) => <td key={i} className="text-right px-2 tabular-nums whitespace-nowrap">{formatCents(v).replace(/,\d\d\s€$/, ' €')}</td>)}
-              <td className="text-right px-2 whitespace-nowrap"><Money cents={grand} colored={false} /></td>
+              {totals.map((v, i) => <td key={i} className="text-right px-2 tabular-nums whitespace-nowrap"><DrillCell onClick={() => showCell(null, periods[i])}>{formatCents(v).replace(/,\d\d\s€$/, ' €')}</DrillCell></td>)}
+              <td className="text-right px-2 whitespace-nowrap"><DrillCell onClick={() => showCell(null)}><Money cents={grand} colored={false} /></DrillCell></td>
               <td className="text-right pl-2 whitespace-nowrap">{formatCents(Math.round(grand / periods.length))}</td>
             </tr>
           </tbody>
@@ -395,6 +447,11 @@ function FixedView({ f, g }: { f: ReportFilter; g: Granularity }) {
   const sum = sumCashflow(rows);
   const plannedSum = contracts.reduce((a, c) => a + c.planned, 0);
   const actualSum = contracts.reduce((a, c) => a + c.actual, 0);
+  const show = useShowLines(f);
+  const drill = useDrill();
+  const showFix = (k: 'fixed' | 'variable', p?: string) => show(
+    p ? `${KIND_LABEL[k]} · ${periodLabel(p)}` : KIND_LABEL[k],
+    both((l) => l.kind === 'expense' && l.fixed === (k === 'fixed'), p ? inPeriod(p, g) : () => true), { period: p });
   useExportTable({
     name: 'vertraege', head: ['Vertrag', 'Geplant im Zeitraum', 'Gebucht', 'Anzahl Buchungen', 'Differenz'],
     rows: contracts.map((c) => [c.name, eur(c.planned), eur(c.actual), c.count, eur(c.actual - c.planned)]),
@@ -402,12 +459,12 @@ function FixedView({ f, g }: { f: ReportFilter; g: Granularity }) {
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <Kpi label="Fixkosten (Buchungen mit Vertrag)"><Money cents={-sum.fixed} /></Kpi>
-        <Kpi label="Variable Ausgaben"><Money cents={-sum.variable} /></Kpi>
+        <Kpi label="Fixkosten (Buchungen mit Vertrag)"><DrillCell onClick={() => showFix('fixed')}><Money cents={-sum.fixed} /></DrillCell></Kpi>
+        <Kpi label="Variable Ausgaben"><DrillCell onClick={() => showFix('variable')}><Money cents={-sum.variable} /></DrillCell></Kpi>
         <Kpi label="Fixkostenquote" hint="Fixkosten im Verhältnis zu den Einnahmen">{sum.income ? pct(sum.fixed / sum.income) : '–'}</Kpi>
         <Kpi label="Verträge: geplant / gebucht" hint="bis heute, inkl. Sparverträge"><span className="text-base">{formatCents(plannedSum)} / {formatCents(actualSum)}</span></Kpi>
       </div>
-      <section className="card p-4 mb-4"><h3 className="text-sm font-semibold mb-3">Fixkosten und variable Ausgaben</h3><FixVarChart data={rows} /></section>
+      <section className="card p-4 mb-4"><h3 className="text-sm font-semibold mb-3">Fixkosten und variable Ausgaben</h3><FixVarChart data={rows} onPick={(p, k) => showFix(k, p)} /><ClickHint /></section>
       <section className="card p-4 overflow-x-auto">
         <h3 className="text-sm font-semibold mb-1">Verträge: geplant gegen tatsächlich gebucht</h3>
         <p className="text-xs text-text-muted mb-3">Geplant ist der Monatsbetrag des Vertrags mal die Monate im Zeitraum. Weicht der gebuchte Betrag stark ab, hat sich der Beitrag geändert, die Buchung ist keinem Vertrag zugeordnet, oder sie läuft über ein anderes Konto.</p>
@@ -415,13 +472,14 @@ function FixedView({ f, g }: { f: ReportFilter; g: Granularity }) {
           <thead className="text-xs text-text-muted"><tr><th className="text-left py-1">Vertrag</th><th className="text-right">Geplant</th><th className="text-right">Gebucht</th><th className="text-right">Buchungen</th><th className="text-right">Differenz</th></tr></thead>
           <tbody className="divide-y divide-border">
             {contracts.map((c) => {
+              const showContract = (x: typeof c) => drill({ title: `Vertrag · ${x.name}`, subtitle: rangeLabel(f), load: (b) => partsFromTx(b, { recurringId: x.id, from: f.from, to: f.to }) });
               const d = c.actual - c.planned;
               const off = c.planned && Math.abs(d) > c.planned * 0.1;
               return (
                 <tr key={c.id}>
-                  <td className="py-1.5">{c.name}</td>
+                  <td className="py-1.5">{c.count ? <DrillCell onClick={() => showContract(c)}>{c.name}</DrillCell> : c.name}</td>
                   <td className="text-right"><Money cents={c.planned} colored={false} /></td>
-                  <td className="text-right">{c.count ? <Money cents={c.actual} colored={false} /> : <span className="text-text-muted">keine Buchung</span>}</td>
+                  <td className="text-right">{c.count ? <DrillCell onClick={() => showContract(c)}><Money cents={c.actual} colored={false} /></DrillCell> : <span className="text-text-muted">keine Buchung</span>}</td>
                   <td className="text-right text-text-muted">{c.count || ''}</td>
                   <td className={`text-right ${off ? 'text-warning font-medium' : 'text-text-muted'}`}>{d > 0 ? '+' : ''}{formatCents(d)}</td>
                 </tr>
@@ -448,6 +506,9 @@ function YearCompare({ f }: { f: ReportFilter }) {
   const maxV = Math.max(1, ...rows.flatMap((r) => [r.current, r.previous]));
   const lp = `${formatDate(prevF.from)} – ${formatDate(prevF.to)}`;
   const lc = `${formatDate(f.from)} – ${formatDate(f.to)}`;
+  const show = useShowLines(f);
+  const pick = (r: { id: string | null; name: string }, ff: ReportFilter) =>
+    show(`${kind === 'expense' ? 'Ausgaben' : 'Einnahmen'} · ${r.name}`, (l) => (kind === 'income' ? l.kind === 'income' : l.kind !== 'income') && l.root_id === r.id, { f: ff });
   useExportTable({
     name: 'vorjahr', head: ['Kategorie', lp, lc, 'Differenz', 'Veränderung'],
     rows: rows.map((r) => [r.name, eur(r.previous), eur(r.current), eur(r.diff), r.pct === null ? '' : pct(r.pct)]),
@@ -470,9 +531,9 @@ function YearCompare({ f }: { f: ReportFilter }) {
             const worse = kind === 'expense' ? r.diff > 0 : r.diff < 0;
             return (
               <tr key={r.id ?? 'none'}>
-                <td className="py-1.5"><span className="inline-flex items-center gap-2"><Dot color={r.color} />{r.name}</span></td>
-                <td className="text-right"><Money cents={r.previous} colored={false} /></td>
-                <td className="text-right"><Money cents={r.current} colored={false} /></td>
+                <td className="py-1.5"><DrillCell onClick={() => pick(r, f)}><span className="inline-flex items-center gap-2"><Dot color={r.color} />{r.name}</span></DrillCell></td>
+                <td className="text-right">{r.previous ? <DrillCell onClick={() => pick(r, prevF)}><Money cents={r.previous} colored={false} /></DrillCell> : <Money cents={0} colored={false} />}</td>
+                <td className="text-right">{r.current ? <DrillCell onClick={() => pick(r, f)}><Money cents={r.current} colored={false} /></DrillCell> : <Money cents={0} colored={false} />}</td>
                 <td className="px-3" aria-hidden>
                   <div className="h-1.5 rounded-full bg-text-muted/30 mb-0.5" style={{ width: `${(r.previous / maxV) * 100}%` }} />
                   <div className="h-1.5 rounded-full" style={{ width: `${(r.current / maxV) * 100}%`, background: r.color }} />
@@ -497,6 +558,10 @@ function Payees({ f }: { f: ReportFilter }) {
   const rows = useMemo(() => topPayees(lines, 100), [lines]);
   useExportTable({ name: 'empfaenger', head: ['Empfänger', 'Buchungen', 'Ausgaben', 'Einnahmen', 'Zuletzt'], rows: rows.map((r) => [r.payee, r.count, eur(r.expense), eur(r.income), formatDate(r.last)]) });
   const max = Math.max(1, ...rows.map((r) => r.expense));
+  const show = useShowLines(f);
+  const pick = (payee: string, sign?: 1 | -1) => show(
+    `${sign === -1 ? 'Ausgaben · ' : sign === 1 ? 'Einnahmen · ' : ''}${payee}`,
+    (l) => (l.payee ?? 'Unbekannt').trim() === payee && (!sign || Math.sign(l.amount) === sign));
   return (
     <section className="card p-4 overflow-x-auto">
       <p className="text-sm text-text-muted mb-3">Die 100 Empfänger und Auftraggeber mit den höchsten Beträgen im Zeitraum.</p>
@@ -505,11 +570,11 @@ function Payees({ f }: { f: ReportFilter }) {
         <tbody className="divide-y divide-border">
           {rows.map((r) => (
             <tr key={r.payee}>
-              <td className="py-1.5"><Link className="hover:underline" to={`/buchungen?suche=${encodeURIComponent(r.payee)}`}>{r.payee}</Link></td>
-              <td className="text-right text-text-muted">{r.count}</td>
-              <td className="text-right">{r.expense ? <Money cents={-r.expense} /> : ''}</td>
+              <td className="py-1.5"><DrillCell onClick={() => pick(r.payee)}>{r.payee}</DrillCell></td>
+              <td className="text-right text-text-muted"><DrillCell onClick={() => pick(r.payee)}>{r.count}</DrillCell></td>
+              <td className="text-right">{r.expense ? <DrillCell onClick={() => pick(r.payee, -1)}><Money cents={-r.expense} /></DrillCell> : ''}</td>
               <td className="px-3" aria-hidden><div className="h-1.5 rounded-full bg-expense/70" style={{ width: `${(r.expense / max) * 100}%` }} /></td>
-              <td className="text-right">{r.income ? <Money cents={r.income} /> : ''}</td>
+              <td className="text-right">{r.income ? <DrillCell onClick={() => pick(r.payee, 1)}><Money cents={r.income} /></DrillCell> : ''}</td>
               <td className="text-right text-text-muted whitespace-nowrap">{formatDate(r.last)}</td>
             </tr>
           ))}
@@ -525,17 +590,30 @@ function Wealth({ f, g }: { f: ReportFilter; g: Granularity }) {
   const [group, setGroup] = useState<WealthGroup>('type');
   const data = useQuery((b) => wealthSeries(b, f, g, group, { type: ACCOUNT_TYPES }), [JSON.stringify(f), g, group]);
   // höchstens 7 eigene Serien, der Rest wird zu „Weitere“
-  const { keys, rows } = useMemo(() => {
+  const { keys, rows, rest } = useMemo(() => {
     const last = data.rows[data.rows.length - 1] ?? {};
     const sorted = [...data.keys].sort((a, b) => Math.abs(Number(last[b] ?? 0)) - Math.abs(Number(last[a] ?? 0)));
-    if (sorted.length <= SERIES.length) return { keys: sorted, rows: data.rows };
+    if (sorted.length <= SERIES.length) return { keys: sorted, rows: data.rows, rest: [] as string[] };
     const keep = sorted.slice(0, SERIES.length - 1);
     const rest = sorted.slice(SERIES.length - 1);
     return {
+      rest,
       keys: [...keep, 'Weitere'],
       rows: data.rows.map((r): Record<string, number | string> => ({ ...Object.fromEntries(keep.map((k) => [k, r[k]])), period: r.period, total: r.total, Weitere: rest.reduce((s, k) => s + Number(r[k] ?? 0), 0) })),
     };
   }, [data]);
+  const drill = useDrill();
+  // Bewegungen (inklusive Umbuchungen) der Konten einer Gruppe in einem Zeitraum
+  const showMoves = (p: string, key?: string) => {
+    const r = periodBounds(p);
+    const from = r.from < f.from ? f.from : r.from;
+    const to = r.to > f.to ? f.to : r.to;
+    const groups = key === 'Weitere' ? new Set(rest) : key ? new Set([key]) : null;
+    drill({
+      title: `Kontobewegungen · ${key ?? 'alle Konten'} · ${periodLabel(p)}`, subtitle: `${formatDate(from)} – ${formatDate(to)}`,
+      load: (b) => partsFromTx(b, { from, to, accountIds: wealthAccounts(b, f, group, { type: ACCOUNT_TYPES }).filter((a) => !groups || groups.has(a.key)).map((a) => a.id) }),
+    });
+  };
   const first = Number(rows[0]?.total ?? 0);
   const last = Number(rows[rows.length - 1]?.total ?? 0);
   useExportTable({ name: 'vermoegen', head: ['Zeitraum', ...keys, 'Gesamt'], rows: rows.map((r) => [periodLabel(String(r.period)), ...keys.map((k) => eur(Number(r[k] ?? 0))), eur(Number(r.total))]) });
@@ -554,15 +632,19 @@ function Wealth({ f, g }: { f: ReportFilter; g: Granularity }) {
             <option value="type">nach Kontoart</option><option value="owner">nach Person</option><option value="account">nach Konto</option>
           </select>
         </div>
-        <StackedAreaChart data={rows} keys={keys} />
-        <p className="text-xs text-text-muted mt-2">Kredite zählen negativ. Grundlage sind die erfassten Kontostände und die Buchungen danach.</p>
+        <StackedAreaChart data={rows} keys={keys} onPick={(p) => showMoves(p)} />
+        <p className="text-xs text-text-muted mt-2">Kredite zählen negativ. Grundlage sind die erfassten Kontostände und die Buchungen danach. Ein Klick in die Grafik oder auf einen Betrag in der Tabelle zeigt die Kontobewegungen dieses Zeitraums.</p>
       </section>
       <section className="card p-4 overflow-x-auto">
         <table className="w-full text-sm min-w-[640px]">
           <thead className="text-xs text-text-muted"><tr><th className="text-left py-1">Zeitraum</th>{keys.map((k) => <th key={k} className="text-right px-2">{k}</th>)}<th className="text-right">Gesamt</th></tr></thead>
           <tbody className="divide-y divide-border">
             {rows.map((r) => (
-              <tr key={String(r.period)}><td className="py-1.5">{periodLabel(String(r.period))}</td>{keys.map((k) => <td key={k} className="text-right px-2"><Money cents={Number(r[k] ?? 0)} colored={false} /></td>)}<td className="text-right font-medium"><Money cents={Number(r.total)} colored={false} /></td></tr>
+              <tr key={String(r.period)}>
+                <td className="py-1.5"><DrillCell onClick={() => showMoves(String(r.period))}>{periodLabel(String(r.period))}</DrillCell></td>
+                {keys.map((k) => <td key={k} className="text-right px-2"><DrillCell onClick={() => showMoves(String(r.period), k)}><Money cents={Number(r[k] ?? 0)} colored={false} /></DrillCell></td>)}
+                <td className="text-right font-medium"><DrillCell onClick={() => showMoves(String(r.period))}><Money cents={Number(r.total)} colored={false} /></DrillCell></td>
+              </tr>
             ))}
           </tbody>
         </table>
@@ -575,6 +657,11 @@ function Wealth({ f, g }: { f: ReportFilter; g: Granularity }) {
 
 function Audit({ f }: { f: ReportFilter }) {
   const rows = useQuery((b) => accountAudit(b, f), [JSON.stringify(f)]);
+  const drill = useDrill();
+  const show = (r: { id: string; name: string }, kind?: 'income' | 'expense' | 'transfer') => drill({
+    title: `${r.name}${kind ? ` · ${kind === 'transfer' ? 'Umbuchungen' : KIND_LABEL[kind]}` : ''}`, subtitle: rangeLabel(f),
+    load: (b) => partsFromTx(b, { accountId: r.id, from: f.from, to: f.to, kind }),
+  });
   useExportTable({
     name: 'kontoabgleich', head: ['Konto', 'Person', 'Anfangsstand', 'Einnahmen', 'Ausgaben', 'Umbuchungen', 'Endstand', 'Nicht durch Buchungen erklärt'],
     rows: rows.map((r) => [r.name, r.owner ?? '', eur(r.start), eur(r.income), eur(r.expense), eur(r.transfers), eur(r.end), eur(r.gap)]),
@@ -587,11 +674,11 @@ function Audit({ f }: { f: ReportFilter }) {
         <tbody className="divide-y divide-border">
           {rows.map((r) => (
             <tr key={r.id}>
-              <td className="py-1.5">{r.name}{r.owner && <span className="text-text-muted"> · {r.owner}</span>}</td>
+              <td className="py-1.5"><DrillCell onClick={() => show(r)}>{r.name}</DrillCell>{r.owner && <span className="text-text-muted"> · {r.owner}</span>}</td>
               <td className="text-right"><Money cents={r.start} colored={false} /></td>
-              <td className="text-right"><Money cents={r.income} /></td>
-              <td className="text-right"><Money cents={-r.expense} /></td>
-              <td className="text-right"><Money cents={r.transfers} colored={false} /></td>
+              <td className="text-right"><DrillCell onClick={() => show(r, 'income')}><Money cents={r.income} /></DrillCell></td>
+              <td className="text-right"><DrillCell onClick={() => show(r, 'expense')}><Money cents={-r.expense} /></DrillCell></td>
+              <td className="text-right"><DrillCell onClick={() => show(r, 'transfer')}><Money cents={r.transfers} colored={false} /></DrillCell></td>
               <td className="text-right font-medium"><Money cents={r.end} colored={false} /></td>
               <td className={`text-right ${r.gap ? 'text-warning font-medium' : 'text-text-muted'}`}>{formatCents(r.gap)}</td>
             </tr>

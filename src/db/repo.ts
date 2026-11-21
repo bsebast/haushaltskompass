@@ -225,12 +225,21 @@ export interface TxFilter {
   search?: string;
   kind?: 'income' | 'expense' | 'transfer';
   limit?: number;
+  /** nur diese Buchungen (z. B. für die Detailansicht einer Auswertung) */
+  ids?: string[];
+  /** mehrere Konten (zusätzlich zu accountId) */
+  accountIds?: string[];
+  /** nur Buchungen, die diesem Vertrag zugeordnet sind */
+  recurringId?: string;
 }
 
 export function listTransactions(b: Book, f: TxFilter = {}): Transaction[] {
   const where: string[] = [];
   const p: (string | number)[] = [];
   if (f.accountId) { where.push('t.account_id = ?'); p.push(f.accountId); }
+  if (f.accountIds) { where.push(`t.account_id in (${f.accountIds.map(() => '?').join(',') || "''"})`); p.push(...f.accountIds); }
+  if (f.ids) { where.push(`t.id in (${f.ids.map(() => '?').join(',') || "''"})`); p.push(...f.ids); }
+  if (f.recurringId) { where.push('t.recurring_id = ?'); p.push(f.recurringId); }
   if (f.from) { where.push('t.date >= ?'); p.push(f.from); }
   if (f.to) { where.push('t.date <= ?'); p.push(f.to); }
   if (f.kind === 'income') where.push('t.amount > 0 and t.transfer_id is null');
