@@ -189,6 +189,16 @@ describe('comdirect-Import', () => {
     expect(st.endBalance).toBe(-4000);
     expect(st.startBalance).toBe(0);
 
+    // Export für einen früheren Zeitraum: „Verbraucht“ gilt für den Exporttag, nicht für das Ende der Datei
+    const old = card.replace('"Verbraucht:";"40,00 €"', '"Datum der Belastung: ";"22/11/2026 09:36h"\r\n"Zeitraum der Bewegung: ";"01.01.2026 - 31.03.2026"\r\n"Verbraucht:";"999,00 €"');
+    const stOld = parseBankCsv(old);
+    expect(stOld.endBalance).toBeNull();
+    expect(stOld.startBalance).toBeNull();
+    expect(stOld.warnings.join(' ')).toMatch(/Exporttag 22\.11\.2026/);
+    // Zeitraum bis zum Exporttag: „Verbraucht“ ist der Endstand
+    const cur = card.replace('"Verbraucht:";"40,00 €"', '"Datum der Belastung: ";"20/03/2026 18:00h"\r\n"Zeitraum der Bewegung: ";"01.01.2026 - 20.03.2026"\r\n"Verbraucht:";"40,00 €"');
+    expect(parseBankCsv(cur).endBalance).toBe(-4000);
+
     const b = await newBook();
     const giro = saveAccount(b, { name: 'Girokonto', type: 'checking', owner: 'Max', iban: 'DE00123456780000000009' });
     saveTransaction(b, { account_id: giro, date: '2026-02-28', amount: -8000, payee: 'Abrechnung Muster Visa-Kreditkarte', autoCategorize: false });
