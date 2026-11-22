@@ -275,9 +275,17 @@ export function parseBankCsv(text: string): BankStatement {
     startBalance = oldB ?? (newB !== null ? newB - sum : null);
     endBalance = newB ?? (oldB !== null ? oldB + sum : null);
     if (oldB === null && newB === null && used !== null && kind === 'credit') {
-      // „Verbraucht“ ist der offene Betrag der Karte, also ein negativer Kontostand
+      // „Verbraucht“ ist der offene Betrag der Karte am Exporttag, also ein negativer Kontostand.
+      // Endet der Zeitraum der Datei vor dem Exporttag, gilt er nicht für das Ende der Datei.
       const owed = parseAmount(used);
-      if (owed !== null) { endBalance = -Math.abs(owed); startBalance = endBalance - sum; }
+      const stamp = headerDate(preVal(/^datum der (belastung|abfrage|erstellung)|^erstellt am|^stand/i));
+      const period = preVal(/^zeitraum/i);
+      const periodEnd = headerDate(period ? period.split(/\s+-\s+|\s+bis\s+/i).pop() ?? null : null);
+      const end = periodEnd && periodEnd < last.date ? last.date : periodEnd;
+      if (owed !== null && stamp && end && end < stamp) {
+        warnings.push(`Die Datei endet am ${end.split('-').reverse().join('.')}. Der Stand „Verbraucht“ gilt für den Exporttag `
+          + `${stamp.split('-').reverse().join('.')} und wird deshalb nicht als Kontostand übernommen.`);
+      } else if (owed !== null) { endBalance = -Math.abs(owed); startBalance = endBalance - sum; }
     }
     if (oldB !== null && newB !== null && oldB + sum !== newB) {
       warnings.push(`Alter Kontostand plus Buchungen ergibt ${(oldB + sum) / 100} €, die Bank meldet ${newB / 100} €. Fehlen Buchungen in der Datei?`);
@@ -291,6 +299,12 @@ export function parseBankCsv(text: string): BankStatement {
     accountName, iban, bank, rows, warnings, dayEnd,
     from: first.date, to: last.date, endBalance, startBalance, kind, holder, refIban,
   };
+}
+
+/** Datum aus einer Kopfangabe wie „22/11/2026 09:36h“ oder „31.05.2026“, als JJJJ-MM-TT. */
+function headerDate(v: string | null): string | null {
+  const m = v ? /(\d{1,2})[./](\d{1,2})[./](\d{4})/.exec(v) : null;
+  return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null;
 }
 
 /** Saldo am Ende eines Tages laut Bank (letzte Buchung an oder vor dem Tag). */
