@@ -194,6 +194,46 @@ export function budgetStatus(b: Book, month: string): BudgetStatus[] {
   return out.sort((a, b) => b.ratio - a.ratio);
 }
 
+/**
+ * Budgetstand über mehrere Monate (z. B. Jahr bis heute): Monatsbudgets zählen je Monat, in dem sie gelten,
+ * Jahresbudgets einmal. Ausgegeben wird, was zwischen from und to gebucht wurde.
+ */
+export function budgetStatusRange(b: Book, from: string, to: string): BudgetStatus[] {
+  const cats = listCategories(b);
+  const byId = new Map(cats.map((c) => [c.id, c]));
+  const fromMonth = from.slice(0, 7);
+  const toMonth = to.slice(0, 7);
+  const out: BudgetStatus[] = [];
+  for (const bu of listBudgets(b)) {
+    const cat = byId.get(bu.category_id);
+    if (!cat) continue;
+    let months = 0;
+    for (let m = fromMonth; m <= toMonth; m = addMonths(m, 1)) {
+      if (bu.valid_from <= m && (!bu.valid_to || bu.valid_to >= m)) months++;
+    }
+    if (!months) continue;
+    const limit = bu.period === 'month' ? bu.amount * months : bu.amount;
+    const ids = descendantIds(cats, cat.id);
+    const q = ids.map(() => '?').join(',');
+    const net = (b.value<number>(
+      `${LINES} select coalesce(sum(amount), 0) from lines where date between ? and ? and category_id in (${q})`,
+      [from, to, ...ids],
+    ) ?? 0) as number;
+    const spent = cat.kind === 'expense' ? Math.max(0, -net) : Math.max(0, net);
+    const ratio = limit ? spent / limit : 0;
+    const t = today();
+    let expectedRatio: number | null = null;
+    if (t >= from && t <= monthRange(toMonth).to) {
+      const start = new Date(from + 'T00:00:00Z').getTime();
+      const end = new Date(monthRange(toMonth).to + 'T00:00:00Z').getTime() + 86400000;
+      expectedRatio = (new Date(t + 'T00:00:00Z').getTime() + 86400000 - start) / (end - start);
+    }
+    const state = ratio > 1 ? 'over' : ratio > 0.9 || (expectedRatio !== null && ratio > expectedRatio + 0.1) ? 'warn' : 'ok';
+    out.push({ budget: bu, category: cat, limit, spent, ratio, expectedRatio, state });
+  }
+  return out.sort((a, b) => b.ratio - a.ratio);
+}
+
 export interface SavingHint {
   kind: 'increase' | 'largest' | 'subscriptions';
   title: string;

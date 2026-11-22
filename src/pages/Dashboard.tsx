@@ -1,13 +1,14 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useQuery } from '../state';
 import { Money, Bar, Dot, Empty, PageHeader } from '../components/ui';
 import { BalanceChart, DonutChart, IncomeExpenseChart } from '../components/charts';
 import type { CategoryTotal } from '../db/reports';
 import type { Book } from '../db/core';
 import { listAccounts, listTransactions, listCategories } from '../db/repo';
-import { monthLeft, balanceTrend, budgetStatus, categoryTotals, monthlyTotals, savingHints } from '../db/reports';
-import { currentMonth, addMonths, monthRange, monthLabel, formatDate } from '../lib/dates';
+import { balanceTrend, balancesAt, budgetStatus, budgetStatusRange, categoryTotals, monthLeft, monthlyTotals, savingHints } from '../db/reports';
+import { addMonths, monthRange, monthLabel, formatDate, today } from '../lib/dates';
+import { formatPeriod, parsePeriod, periodRange, shiftPeriod, switchKind, type Period, type PeriodRange } from '../lib/period';
 import { ACCOUNT_TYPES } from '../db/types';
 import { useTxDialog } from '../components/Layout';
 import { DrillCell, useDrill, partsFromLines, partsFromTx } from '../components/DrillDown';
@@ -28,8 +29,6 @@ function Card({ title, link, children, className = '' }: { title: string; link?:
     </section>
   );
 }
-
-type Span = 'month' | 'year';
 
 /** Sammelposten für Gutschriften auf Ausgabe-Kategorien (Rückzahlungen, Gutschriften vom Händler usw.). */
 const REFUNDS = '__rueckfluesse';
@@ -52,41 +51,60 @@ function incomeComposition(b: Book, from: string, to: string): CategoryTotal[] {
   return out.map((r) => ({ ...r, share: r.amount / total })).sort((a, b) => b.amount - a.amount);
 }
 
-/** Zeitraum der Kategorie-Karten: laufender Monat oder Jahr bis heute. */
-function spanRange(span: Span, month: string): { from: string; to: string; label: string } {
-  if (span === 'month') return { ...monthRange(month), label: monthLabel(month, true) };
-  const y = month.slice(0, 4);
-  return { from: `${y}-01-01`, to: monthRange(month).to, label: `Jahr ${y}` };
-}
-
-function SpanToggle({ value, onChange }: { value: Span; onChange: (s: Span) => void }) {
+/** Umschalter oben auf der Übersicht: beliebiger Monat oder Jahr bis heute (YTD), mit Vor/Zurück. */
+function PeriodPicker({ period, range, firstMonth, onChange }: { period: Period; range: PeriodRange; firstMonth: string; onChange: (p: Period) => void }) {
+  const now = today();
+  const isMonth = period.kind === 'month';
+  const step = isMonth ? 'Monat' : 'Jahr';
+  const lastMonth = now.slice(0, 7);
+  const months: string[] = [];
+  for (let m = lastMonth; m >= firstMonth && months.length < 240; m = addMonths(m, -1)) months.push(m);
+  const years = [...new Set(months.map((m) => Number(m.slice(0, 4))))];
+  const value = isMonth ? period.month : String(period.year);
+  // ein Zeitraum außerhalb der Liste (z. B. per Link) bleibt wählbar
+  if (isMonth && !months.includes(period.month)) months.push(period.month);
+  if (!isMonth && !years.includes(period.year)) years.push(period.year);
+  const options = isMonth
+    ? [...months].sort().reverse().map((m) => [m, monthLabel(m, true)])
+    : [...years].sort((a, b) => b - a).map((y) => [String(y), String(y) === now.slice(0, 4) ? `${y} bis heute` : `Jahr ${y}`]);
   return (
-    <div className="inline-flex rounded-full bg-surface-2 p-0.5 text-xs" role="group" aria-label="Zeitraum">
-      {(['month', 'year'] as const).map((s) => (
-        <button key={s} type="button" onClick={() => onChange(s)} aria-pressed={value === s}
-          className={`px-2.5 py-0.5 rounded-full ${value === s ? 'bg-surface text-text font-medium shadow-card' : 'text-text-muted hover:text-text'}`}>
-          {s === 'month' ? 'Monat' : 'Jahr'}
-        </button>
-      ))}
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="inline-flex rounded-full bg-surface-2 p-0.5 text-sm" role="group" aria-label="Zeitraum">
+        {(['month', 'ytd'] as const).map((k) => (
+          <button key={k} type="button" onClick={() => onChange(switchKind(period, k))} aria-pressed={period.kind === k}
+            className={`px-3 py-1 rounded-full ${period.kind === k ? 'bg-surface text-text font-medium shadow-card' : 'text-text-muted hover:text-text'}`}>
+            {k === 'month' ? 'Monat' : 'YTD'}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-1">
+        <button className="btn-secondary w-9 px-0" aria-label={`Vorheriger ${step}`} onClick={() => onChange(shiftPeriod(period, -1))}><ChevronLeft size={16} /></button>
+        <select className="input w-44" aria-label={isMonth ? 'Monat wählen' : 'Jahr wählen'} value={value}
+          onChange={(e) => onChange(isMonth ? { kind: 'month', month: e.target.value } : { kind: 'ytd', year: Number(e.target.value) })}>
+          {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button className="btn-secondary w-9 px-0 disabled:opacity-40" aria-label={`Nächster ${step}`} disabled={range.current}
+          onClick={() => onChange(shiftPeriod(period, 1))}><ChevronRight size={16} /></button>
+      </div>
+      {!range.current && (
+        <button className="btn-ghost" onClick={() => onChange(isMonth ? { kind: 'month', month: lastMonth } : { kind: 'ytd', year: Number(now.slice(0, 4)) })}>Heute</button>
+      )}
     </div>
   );
 }
 
 /** Kreisdiagramm mit Top-Liste für Ausgaben oder Einnahmen nach (Haupt-)Kategorie; Klick öffnet die Buchungen. */
-function CategoryCard({ kind, data, span, onSpan, onPick }: {
-  kind: 'income' | 'expense'; data: CategoryTotal[]; span: Span; onSpan: (s: Span) => void; onPick: (c: CategoryTotal) => void;
+function CategoryCard({ kind, data, label, onPick }: {
+  kind: 'income' | 'expense'; data: CategoryTotal[]; label: string; onPick: (c: CategoryTotal) => void;
 }) {
   const none = kind === 'income' ? 'Einnahmen' : 'Ausgaben';
   return (
     <section className="card p-5">
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h2 className="text-sm font-semibold tracking-tight whitespace-nowrap">{none} nach Kategorie</h2>
-        <div className="flex items-center gap-2">
-          <SpanToggle value={span} onChange={onSpan} />
-          <Link to="/auswertungen" className="text-xs text-accent hover:underline">Details</Link>
-        </div>
+        <h2 className="text-sm font-semibold tracking-tight">{none} nach Kategorie <span className="font-normal text-text-muted">· {label}</span></h2>
+        <Link to="/auswertungen" className="text-xs text-accent hover:underline">Details</Link>
       </div>
-      {data.length === 0 ? <p className="text-sm text-text-muted">{span === 'month' ? 'Diesen Monat' : 'Dieses Jahr'} noch keine {none}.</p> : (
+      {data.length === 0 ? <p className="text-sm text-text-muted">Im Zeitraum {label} keine {none}.</p> : (
         <>
           <DonutChart data={data.slice(0, 8)} height={160} onPick={onPick} />
           <ul className="mt-2 space-y-1 text-sm">
@@ -108,26 +126,58 @@ function CategoryCard({ kind, data, span, onSpan, onPick }: {
 }
 
 export default function Dashboard() {
-  const m = currentMonth();
-  const left = useQuery((b) => monthLeft(b, m), [m]);
+  const [params, setParams] = useSearchParams();
+  const period = parsePeriod(params.get('zeitraum'));
+  const range = periodRange(period);
+  const setPeriod = (p: Period) => {
+    const next = new URLSearchParams(params);
+    const v = formatPeriod(p);
+    if (v) next.set('zeitraum', v); else next.delete('zeitraum');
+    setParams(next, { replace: true });
+  };
+  const isMonth = period.kind === 'month';
+  /** Monat, auf den sich monatsbezogene Karten (Budgets im Monatsmodus, Sparpotenzial) beziehen */
+  const m = range.toMonth;
+  const { from, to, fromMonth, toMonth } = range;
+  const firstMonth = useQuery((b) => (b.value<string>('select min(date) from transactions') ?? today()).slice(0, 7));
+  const leftMonth = useQuery((b) => monthLeft(b, m), [m]);
+  // YTD zählt nur Buchungen bis heute (bzw. Jahresende), der Monatsmodus wie bisher den ganzen Monat
+  const ytdTotals = useQuery((b) => {
+    if (isMonth) return null;
+    const r = b.get<{ income: number; expense: number }>(
+      `select coalesce(sum(case when a > 0 then a else 0 end), 0) as income, coalesce(-sum(case when a < 0 then a else 0 end), 0) as expense
+       from (select coalesce(s.amount, t.amount) as a from transactions t left join splits s on s.transaction_id = t.id
+             where t.transfer_id is null and t.date between ? and ?)`, [from, to]);
+    return r ?? { income: 0, expense: 0 };
+  }, [isMonth, from, to]);
+  const income = ytdTotals?.income ?? leftMonth.income;
+  const expense = ytdTotals?.expense ?? leftMonth.expense;
+  const monthCount = (Number(toMonth.slice(0, 4)) - Number(fromMonth.slice(0, 4))) * 12 + Number(toMonth.slice(5)) - Number(fromMonth.slice(5)) + 1;
   const accounts = useQuery((b) => listAccounts(b));
-  const trend = useQuery((b) => balanceTrend(b, addMonths(m, -11), m), [m]);
-  const totals = useQuery((b) => monthlyTotals(b, addMonths(m, -5), m), [m]);
-  const budgets = useQuery((b) => budgetStatus(b, m), [m]);
-  const [expSpan, setExpSpan] = useState<Span>('month');
-  const [incSpan, setIncSpan] = useState<Span>('month');
-  const expR = spanRange(expSpan, m);
-  const incR = spanRange(incSpan, m);
-  const topCats = useQuery((b) => categoryTotals(b, expR.from, expR.to, 'expense', { excludeExternal: true }), [expR.from, expR.to]);
-  const incomeCats = useQuery((b) => incomeComposition(b, incR.from, incR.to), [incR.from, incR.to]);
-  const recent = useQuery((b) => listTransactions(b, { limit: 8 }));
+  /** Kontostände zum Periodenende; im laufenden Zeitraum der aktuelle Stand */
+  const balances = useQuery((b) => {
+    const list = listAccounts(b);
+    if (range.current) return new Map(list.map((a) => [a.id, a.balance]));
+    const per = balancesAt(b, [to], list.map((a) => a.id));
+    return new Map(list.map((a) => [a.id, per.get(a.id)?.[0] ?? 0]));
+  }, [range.current, to]);
+  const balanceOf = (id: string) => balances.get(id) ?? 0;
+  const trend = useQuery((b) => balanceTrend(b, addMonths(toMonth, -11), toMonth), [toMonth]);
+  const chartFrom = isMonth ? addMonths(m, -5) : fromMonth;
+  const totals = useQuery((b) => monthlyTotals(b, chartFrom, toMonth), [chartFrom, toMonth]);
+  const budgets = useQuery((b) => (isMonth ? budgetStatus(b, m) : budgetStatusRange(b, from, to)), [isMonth, m, from, to]);
+  const catRange = { from, to, label: range.label };
+  const topCats = useQuery((b) => categoryTotals(b, from, to, 'expense', { excludeExternal: true }), [from, to]);
+  const incomeCats = useQuery((b) => incomeComposition(b, from, to), [from, to]);
+  const recent = useQuery((b) => listTransactions(b, { to, limit: 8 }), [to]);
+  const anyTx = useQuery((b) => listTransactions(b, { limit: 1 }).length > 0);
   const hints = useQuery((b) => savingHints(b, m), [m]);
   const open = useQuery((b) => listTransactions(b, { uncategorized: true }).length);
   const contracts = useQuery((b) => listContracts(b));
   const alerts = useQuery(listAlerts);
   const warranties = useQuery((b) => listInventory(b).filter((x) => warrantyEndingSoon(x, 30)));
   const { openNew } = useTxDialog();
-  const total = accounts.filter((a) => !a.external).reduce((s, a) => s + a.balance, 0);
+  const total = accounts.filter((a) => !a.external).reduce((s, a) => s + balanceOf(a.id), 0);
   const drill = useDrill();
   const showMonth = (month: string, kind: 'income' | 'expense', root?: { id: string | null; name: string }) => {
     const mr = monthRange(month);
@@ -148,12 +198,20 @@ export default function Dashboard() {
       },
     });
   };
+  /** Einnahmen oder Ausgaben des ganzen gewählten Zeitraums */
+  const showPeriod = (kind: 'income' | 'expense') => {
+    if (isMonth) return showMonth(m, kind);
+    drill({
+      title: `${kind === 'income' ? 'Einnahmen' : 'Ausgaben'} · ${range.label}`,
+      load: (b) => partsFromLines(reportLines(b, { from, to }).filter((l) => (kind === 'income') === (l.amount > 0))),
+    });
+  };
   const showMoves = (month: string) => {
     const mr = monthRange(month);
     drill({ title: `Kontobewegungen · ${monthLabel(month, true)}`, load: (b) => partsFromTx(b, { ...mr, accountIds: listAccounts(b, true).filter((a) => !a.external).map((a) => a.id) }) });
   };
 
-  if (!recent.length && !contracts.length) {
+  if (!anyTx && !contracts.length) {
     return (
       <div className="card">
         <Empty title="Willkommen in deinem Haushaltsbuch" text="Erfasse deine erste Ausgabe oder Einnahme. Danach füllt sich diese Übersicht von selbst."
@@ -164,7 +222,11 @@ export default function Dashboard() {
 
   return (
     <>
-    <PageHeader title="Übersicht" subtitle={`${new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Gesamtvermögen ${formatCents(total)}`} />
+    <PageHeader title="Übersicht"
+      subtitle={range.current
+        ? `${new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · Gesamtvermögen ${formatCents(total)}`
+        : `${range.label} · Gesamtvermögen am ${formatDate(to)}: ${formatCents(total)}`}
+      actions={<PeriodPicker period={period} range={range} firstMonth={firstMonth} onChange={setPeriod} />} />
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
       {(alerts.length > 0 || warranties.length > 0) && (
         <section role="status" className="card p-5 md:col-span-2 xl:col-span-3 border-warning/50 bg-warning/5">
@@ -183,31 +245,34 @@ export default function Dashboard() {
           </ul>
         </section>
       )}
-      <Card title={`Was bleibt im ${monthLabel(m, true)}`} link={['/auswertungen', 'Auswertungen']}>
-        <div className="text-4xl font-semibold mt-1"><Money cents={left.left} /></div>
+      <Card title={isMonth ? `Was bleibt im ${range.label}` : `Was bleibt · ${range.label}`} link={['/auswertungen', 'Auswertungen']}>
+        <div className="text-4xl font-semibold mt-1"><Money cents={income - expense} /></div>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-          <div><dt className="text-text-muted text-xs">Einnahmen</dt><dd><DrillCell onClick={() => showMonth(m, 'income')}><Money cents={left.income} /></DrillCell></dd></div>
-          <div><dt className="text-text-muted text-xs">Ausgaben</dt><dd><DrillCell onClick={() => showMonth(m, 'expense')}><Money cents={-left.expense} /></DrillCell></dd></div>
+          <div><dt className="text-text-muted text-xs">Einnahmen</dt><dd><DrillCell onClick={() => showPeriod('income')}><Money cents={income} /></DrillCell></dd></div>
+          <div><dt className="text-text-muted text-xs">Ausgaben</dt><dd><DrillCell onClick={() => showPeriod('expense')}><Money cents={-expense} /></DrillCell></dd></div>
         </dl>
-        {left.projectedLeft !== null && (
-          <p className="text-xs text-text-muted mt-3">Hochrechnung bis Monatsende: <Money cents={left.projectedLeft} colored={false} className="font-medium text-text" /></p>
+        {isMonth && leftMonth.projectedLeft !== null && (
+          <p className="text-xs text-text-muted mt-3">Hochrechnung bis Monatsende: <Money cents={leftMonth.projectedLeft} colored={false} className="font-medium text-text" /></p>
+        )}
+        {!isMonth && monthCount > 1 && (
+          <p className="text-xs text-text-muted mt-3">Ø je Monat: <Money cents={Math.round((income - expense) / monthCount)} colored={false} className="font-medium text-text" /></p>
         )}
         {open > 0 && <p className="text-xs mt-2"><Link to="/buchungen" className="text-warning hover:underline">{open} Buchungen ohne Kategorie</Link></p>}
       </Card>
 
-      <Card title="Konten" link={['/konten', 'Alle Konten']}>
+      <Card title={range.current ? 'Konten' : `Konten am ${formatDate(to)}`} link={['/konten', 'Alle Konten']}>
         <ul className="space-y-2">
           {accounts.map((a) => (
             <li key={a.id} className="flex justify-between gap-3 text-sm">
               <Link to={`/buchungen?konto=${a.id}`} className="truncate hover:underline">{a.name} <span className="text-text-muted text-xs">{ACCOUNT_TYPES[a.type]}</span></Link>
-              <Money cents={a.balance} />
+              <Money cents={balanceOf(a.id)} />
             </li>
           ))}
         </ul>
         <div className="flex justify-between border-t border-border mt-3 pt-2 text-sm font-semibold"><span>Gesamt</span><Money cents={total} /></div>
       </Card>
 
-      <Card title="Budgets diesen Monat" link={['/budgets', 'Verwalten']}>
+      <Card title={isMonth ? `Budgets im ${range.label}` : `Budgets · ${range.label}`} link={['/budgets', 'Verwalten']}>
         {budgets.length === 0 ? <p className="text-sm text-text-muted">Noch keine Budgets. <Link to="/budgets" className="text-accent hover:underline">Jetzt anlegen</Link></p> : (
           <ul className="space-y-3">
             {budgets.slice(0, 5).map((s) => (
@@ -223,19 +288,19 @@ export default function Dashboard() {
         )}
       </Card>
 
-      <Card title="Kontostand der letzten 12 Monate" className="md:col-span-2">
+      <Card title={range.current ? 'Kontostand der letzten 12 Monate' : `Kontostand der 12 Monate bis ${monthLabel(toMonth, true)}`} className="md:col-span-2">
         <BalanceChart data={trend} height={300} onPick={showMoves} />
       </Card>
 
-      <CategoryCard kind="expense" data={topCats} span={expSpan} onSpan={setExpSpan} onPick={(c) => showCategory(expR, 'expense', c)} />
+      <CategoryCard kind="expense" data={topCats} label={range.label} onPick={(c) => showCategory(catRange, 'expense', c)} />
 
-      <CategoryCard kind="income" data={incomeCats} span={incSpan} onSpan={setIncSpan} onPick={(c) => showCategory(incR, 'income', c)} />
+      <CategoryCard kind="income" data={incomeCats} label={range.label} onPick={(c) => showCategory(catRange, 'income', c)} />
 
-      <Card title="Einnahmen und Ausgaben" className="md:col-span-2">
+      <Card title={isMonth ? `Einnahmen und Ausgaben, 6 Monate bis ${range.label}` : `Einnahmen und Ausgaben · ${range.label}`} className="md:col-span-2">
         <IncomeExpenseChart data={totals} height={220} onPick={(month, k) => showMonth(month, k)} />
       </Card>
 
-      <Card title="Sparpotenzial">
+      <Card title={`Sparpotenzial im ${monthLabel(m, true)}`}>
         {hints.length === 0 ? <p className="text-sm text-text-muted">Für Hinweise braucht es etwas mehr Buchungen.</p> : (
           <ul className="space-y-3 text-sm">
             {hints.slice(0, 4).map((h, i) => (
@@ -261,7 +326,7 @@ export default function Dashboard() {
         </Card>
       )}
 
-      <Card title="Letzte Buchungen" link={['/buchungen', 'Alle Buchungen']} className="md:col-span-2 xl:col-span-3">
+      <Card title={range.current ? 'Letzte Buchungen' : `Letzte Buchungen bis ${formatDate(to)}`} link={['/buchungen', 'Alle Buchungen']} className="md:col-span-2 xl:col-span-3">
         <ul className="divide-y divide-border">
           {recent.map((t) => (
             <li key={t.id} className="flex items-center gap-3 py-2 text-sm">
