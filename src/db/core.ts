@@ -3,7 +3,7 @@ import schema from './schema.sql?raw';
 import { seedDefaults } from './seed';
 import { now } from '../lib/id';
 
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 /** Migrationen von Version n-1 auf n. Neue Bücher starten mit schema.sql (Version 1) und durchlaufen alle Migrationen. */
 const MIGRATIONS: Record<number, string> = {
@@ -119,6 +119,21 @@ const MIGRATIONS: Record<number, string> = {
       insurance text,
       note text,
       document_id text references documents(id) on delete set null,
+      created_at text not null, updated_at text not null
+    );
+  `,
+  7: `
+    create table savings_goals (
+      id text primary key,
+      name text not null check (length(name) between 1 and 80),
+      target integer not null check (target > 0),
+      target_date text,
+      saved integer not null default 0,
+      account_id text references accounts(id) on delete set null,
+      color text,
+      note text,
+      done integer not null default 0,
+      sort_order integer not null default 0,
       created_at text not null, updated_at text not null
     );
   `,

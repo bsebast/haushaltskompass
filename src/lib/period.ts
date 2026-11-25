@@ -1,4 +1,4 @@
-import { addMonths, monthLabel, monthRange, today } from './dates';
+import { addMonths, daysInMonth, monthLabel, monthRange, today, ymd } from './dates';
 
 /** Zeitraum der Übersicht: ein Kalendermonat oder das Jahr bis heute (YTD). */
 export type Period = { kind: 'month'; month: string } | { kind: 'ytd'; year: number };
@@ -57,4 +57,33 @@ export function switchKind(p: Period, kind: Period['kind'], now = today()): Peri
   if (kind === 'ytd') return { kind: 'ytd', year: Number((p as { month: string }).month.slice(0, 4)) };
   const y = (p as { year: number }).year;
   return { kind: 'month', month: now.startsWith(String(y)) ? now.slice(0, 7) : `${y}-12` };
+}
+
+/** Tag im Monat, höchstens dessen letzter Tag (z. B. 31. → 28./29. im Februar). */
+function clampDay(month: string, day: number): string {
+  return ymd(Number(month.slice(0, 4)), Number(month.slice(5, 7)), Math.min(day, daysInMonth(month)));
+}
+
+/**
+ * Vergleichszeitraum für die Übersicht: beim Monat der Vormonat, beim YTD der gleiche Zeitraum im Vorjahr.
+ * Läuft der Monat noch, zählt der Vormonat nur bis zum gleichen Tag, damit halbe und ganze Monate nicht verglichen werden.
+ */
+export function previousRange(p: Period, now = today()): { from: string; to: string; label: string } {
+  if (p.kind === 'month') {
+    const prev = addMonths(p.month, -1);
+    const r = monthRange(prev);
+    const running = now.startsWith(p.month);
+    const day = Number(now.slice(8, 10));
+    return running
+      ? { from: r.from, to: clampDay(prev, day), label: `${monthLabel(prev, true).split(' ')[0]} bis zum ${day}.` }
+      : { ...r, label: 'Vormonat' };
+  }
+  const cur = periodRange(p, now);
+  const y = p.year - 1;
+  const to = clampDay(`${y}-${cur.to.slice(5, 7)}`, Number(cur.to.slice(8, 10)));
+  return { from: `${y}-01-01`, to, label: cur.current ? `${y} bis ${formatShort(to)}` : `Jahr ${y}` };
+}
+
+function formatShort(d: string): string {
+  return `${Number(d.slice(8, 10))}.${Number(d.slice(5, 7))}.`;
 }

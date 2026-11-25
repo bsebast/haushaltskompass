@@ -410,3 +410,11 @@ export function moneyFlow(lines: Line[], cats: Category[], maxPerSide = 8): Mone
   right.forEach((n) => { nodes.push(n); links.push({ source: hub, target: nodes.length - 1, value: n.amount }); });
   return { nodes, links, income, outflow };
 }
+
+/**
+ * Kennzahlen eines Zeitraums wie im Reiter Überblick der Auswertungen: Einnahmen, Ausgaben (ohne Sparen & Anlegen),
+ * Gespartes und Sparquote = (Einnahmen − Ausgaben) ÷ Einnahmen.
+ */
+export function periodCashflow(b: Book, from: string, to: string): CashflowRow {
+  return sumCashflow(cashflow(reportLines(b, { from, to }), periodsBetween(from, to, 'month'), 'month'));
+}

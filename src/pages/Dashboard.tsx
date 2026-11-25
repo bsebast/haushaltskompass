@@ -6,14 +6,16 @@ import { BalanceChart, DonutChart, IncomeExpenseChart } from '../components/char
 import type { CategoryTotal } from '../db/reports';
 import type { Book } from '../db/core';
 import { listAccounts, listTransactions, listCategories } from '../db/repo';
-import { balanceTrend, balancesAt, budgetStatus, budgetStatusRange, categoryTotals, monthLeft, monthlyTotals, savingHints } from '../db/reports';
+import { balanceTrend, balancesAt, budgetStatus, budgetStatusRange, categoryTotals, monthLeft, monthlyTotals, rangeTotals, savingHints } from '../db/reports';
 import { addMonths, monthRange, monthLabel, formatDate, today } from '../lib/dates';
-import { formatPeriod, parsePeriod, periodRange, shiftPeriod, switchKind, type Period, type PeriodRange } from '../lib/period';
+import { formatPeriod, parsePeriod, periodRange, previousRange, shiftPeriod, switchKind, type Period, type PeriodRange } from '../lib/period';
 import { ACCOUNT_TYPES } from '../db/types';
 import { useTxDialog } from '../components/Layout';
 import { DrillCell, useDrill, partsFromLines, partsFromTx } from '../components/DrillDown';
-import { reportLines } from '../db/analytics';
+import { periodCashflow, reportLines } from '../db/analytics';
 import { listContracts, perMonth, upcoming } from '../db/contracts';
+import { dueIn } from '../db/forecast';
+import { goalColor, goalProgress, listGoals } from '../db/goals';
 import { listAlerts } from '../db/alerts';
 import { listInventory, warrantyEndingSoon } from '../db/inventory';
 import { formatCents } from '../lib/money';
@@ -29,6 +31,19 @@ function Card({ title, link, children, className = '' }: { title: string; link?:
     </section>
   );
 }
+
+/** Veränderung zum Vergleichszeitraum; good = Richtung, die gut ist (mehr Einnahmen, weniger Ausgaben). */
+function Delta({ value, good, label, unit = 'eur', short }: { value: number | null; good: 'up' | 'down'; label: string; unit?: 'eur' | 'pp'; short?: boolean }) {
+  if (value === null) return null;
+  const zero = unit === 'eur' ? value === 0 : Math.round(value * 100) === 0;
+  const better = good === 'up' ? value > 0 : value < 0;
+  const cls = zero ? 'text-text-muted' : better ? 'text-success' : 'text-danger';
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '±';
+  const text = unit === 'eur' ? formatCents(Math.abs(value)) : `${Math.abs(Math.round(value * 100))} Pp.`;
+  return <div className={`text-xs ${cls}`} title={`Veränderung ggü. ${label}`}>{zero ? 'gleich' : `${sign}${text}`}{!short && <span className="text-text-muted"> ggü. {label}</span>}</div>;
+}
+
+const pct = (v: number | null) => (v === null ? '–' : `${Math.round(v * 100)} %`);
 
 /** Sammelposten für Gutschriften auf Ausgabe-Kategorien (Rückzahlungen, Gutschriften vom Händler usw.). */
 const REFUNDS = '__rueckfluesse';
@@ -152,6 +167,13 @@ export default function Dashboard() {
   }, [isMonth, from, to]);
   const income = ytdTotals?.income ?? leftMonth.income;
   const expense = ytdTotals?.expense ?? leftMonth.expense;
+  /** Vergleich: Vormonat (laufend: bis zum gleichen Tag) bzw. gleicher Zeitraum im Vorjahr */
+  const prev = previousRange(period);
+  const prevTotals = useQuery((b) => rangeTotals(b, prev.from, prev.to), [prev.from, prev.to]);
+  const hasPrev = useQuery((b) => (b.value<number>('select count(*) from transactions where date between ? and ?', [prev.from, prev.to]) ?? 0) > 0, [prev.from, prev.to]);
+  const flow = useQuery((b) => periodCashflow(b, from, to), [from, to]);
+  const prevFlow = useQuery((b) => periodCashflow(b, prev.from, prev.to), [prev.from, prev.to]);
+  const goals = useQuery((b) => goalProgress(b, listGoals(b).filter((g) => !g.done)));
   const monthCount = (Number(toMonth.slice(0, 4)) - Number(fromMonth.slice(0, 4))) * 12 + Number(toMonth.slice(5)) - Number(fromMonth.slice(5)) + 1;
   const accounts = useQuery((b) => listAccounts(b));
   /** Kontostände zum Periodenende; im laufenden Zeitraum der aktuelle Stand */
@@ -174,6 +196,8 @@ export default function Dashboard() {
   const hints = useQuery((b) => savingHints(b, m), [m]);
   const open = useQuery((b) => listTransactions(b, { uncategorized: true }).length);
   const contracts = useQuery((b) => listContracts(b));
+  const budgetReserve = budgets.reduce((a, s) => a + Math.max(0, s.limit - s.spent), 0);
+  const fixedThisMonth = -contracts.filter((c) => c.amount < 0 && dueIn(c, m)).reduce((a, c) => a + c.amount, 0);
   const alerts = useQuery(listAlerts);
   const warranties = useQuery((b) => listInventory(b).filter((x) => warrantyEndingSoon(x, 30)));
   const { openNew } = useTxDialog();
@@ -247,9 +271,15 @@ export default function Dashboard() {
       )}
       <Card title={isMonth ? `Was bleibt im ${range.label}` : `Was bleibt · ${range.label}`} link={['/auswertungen', 'Auswertungen']}>
         <div className="text-4xl font-semibold mt-1"><Money cents={income - expense} /></div>
-        <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-          <div><dt className="text-text-muted text-xs">Einnahmen</dt><dd><DrillCell onClick={() => showPeriod('income')}><Money cents={income} /></DrillCell></dd></div>
-          <div><dt className="text-text-muted text-xs">Ausgaben</dt><dd><DrillCell onClick={() => showPeriod('expense')}><Money cents={-expense} /></DrillCell></dd></div>
+        {hasPrev && <Delta value={(income - expense) - (prevTotals.income - prevTotals.expense)} good="up" label={prev.label} />}
+        <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
+          <div><dt className="text-text-muted text-xs">Einnahmen</dt><dd><DrillCell onClick={() => showPeriod('income')}><Money cents={income} /></DrillCell></dd>
+            {hasPrev && <dd><Delta value={income - prevTotals.income} good="up" label={prev.label} short /></dd>}</div>
+          <div><dt className="text-text-muted text-xs">Ausgaben</dt><dd><DrillCell onClick={() => showPeriod('expense')}><Money cents={-expense} /></DrillCell></dd>
+            {hasPrev && <dd><Delta value={expense - prevTotals.expense} good="down" label={prev.label} short /></dd>}</div>
+          <div><dt className="text-text-muted text-xs" title="(Einnahmen − Ausgaben) ÷ Einnahmen; Sparen & Anlegen zählt als gespart, wie in den Auswertungen">Sparquote</dt>
+            <dd className="font-medium tabular-nums">{pct(flow.rate)}</dd>
+            {hasPrev && flow.rate !== null && prevFlow.rate !== null && <dd><Delta value={flow.rate - prevFlow.rate} good="up" unit="pp" label={prev.label} short /></dd>}</div>
         </dl>
         {isMonth && leftMonth.projectedLeft !== null && (
           <p className="text-xs text-text-muted mt-3">Hochrechnung bis Monatsende: <Money cents={leftMonth.projectedLeft} colored={false} className="font-medium text-text" /></p>
@@ -282,6 +312,34 @@ export default function Dashboard() {
                   <span className="tabular-nums text-text-muted"><Money cents={s.spent} colored={false} /> / <Money cents={s.limit} colored={false} /></span>
                 </div>
                 <Bar ratio={s.ratio} state={s.state} />
+              </li>
+            ))}
+          </ul>
+        )}
+        {(budgets.length > 0 || (isMonth && fixedThisMonth > 0)) && (
+          <p className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border mt-3 pt-2 text-xs text-text-muted">
+            {budgets.length > 0 && <span title="Summe dessen, was in den Budgets noch nicht verbraucht ist">Budgetreserve <Money cents={budgetReserve} colored={false} className="font-medium text-text" /></span>}
+            {isMonth && fixedThisMonth > 0 && <span title="Ausgaben aus Verträgen, die in diesem Monat fällig sind">Fixkosten im {monthLabel(m, true).split(' ')[0]} <Money cents={fixedThisMonth} colored={false} className="font-medium text-text" /></span>}
+          </p>
+        )}
+      </Card>
+
+      <Card title="Sparziele" link={['/sparziele', goals.length ? 'Alle Ziele' : 'Anlegen']}>
+        {goals.length === 0 ? <p className="text-sm text-text-muted">Noch keine Sparziele. Lege z. B. einen Notgroschen oder den nächsten Urlaub an und verfolge, wie weit du bist. <Link to="/sparziele" className="text-accent hover:underline">Ziel anlegen</Link></p> : (
+          <ul className="space-y-3">
+            {goals.slice(0, 4).map((p, i) => (
+              <li key={p.goal.id}>
+                <div className="flex justify-between gap-2 text-sm mb-1">
+                  <span className="truncate font-medium">{p.goal.name}</span>
+                  <span className="tabular-nums text-text-muted whitespace-nowrap"><Money cents={p.current} colored={false} /> / <Money cents={p.goal.target} colored={false} /></span>
+                </div>
+                <div className="h-2 rounded-full bg-surface-2 overflow-hidden" role="progressbar" aria-label={p.goal.name} aria-valuenow={Math.round(p.ratio * 100)} aria-valuemin={0} aria-valuemax={100}>
+                  <div className="h-full rounded-full" style={{ width: `${p.ratio * 100}%`, background: goalColor(p.goal, i) }} />
+                </div>
+                <div className="text-xs text-text-muted mt-0.5">
+                  {Math.round(p.ratio * 100)} %{p.goal.target_date && ` · bis ${formatDate(p.goal.target_date)}`}
+                  {p.reached ? ' · erreicht' : p.overdue ? <span className="text-warning"> · Datum überschritten</span> : p.perMonth ? ` · ${formatCents(p.perMonth)} im Monat nötig` : p.eta ? ` · erreicht etwa ${monthLabel(p.eta, true)}` : ''}
+                </div>
               </li>
             ))}
           </ul>

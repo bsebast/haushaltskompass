@@ -16,6 +16,7 @@ import Wealth from './pages/Wealth';
 import Pensions from './pages/Pensions';
 import Forecast from './pages/Forecast';
 import Inventory from './pages/Inventory';
+import Goals from './pages/Goals';
 
 export default function App() {
   const { status, error } = useBookCtx();
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="vermoegen" element={<Wealth />} />
         <Route path="vorsorge" element={<Pensions />} />
         <Route path="budgets" element={<Budgets />} />
+        <Route path="sparziele" element={<Goals />} />
         <Route path="prognose" element={<Forecast />} />
         <Route path="inventar" element={<Inventory />} />
         <Route path="auswertungen" element={<Reports />} />

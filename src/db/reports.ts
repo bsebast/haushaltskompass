@@ -277,3 +277,13 @@ export function savingHints(b: Book, month: string): SavingHint[] {
 export function netWorth(b: Book): number {
   return listAccounts(b).filter((x) => !x.external).reduce((a, x) => a + x.balance, 0);
 }
+
+/** Einnahmen und Ausgaben (positiv) zwischen zwei Tagen, ohne Umbuchungen; wie die Monatssummen. */
+export function rangeTotals(b: Book, from: string, to: string): { income: number; expense: number } {
+  const r = b.get<{ income: number; expense: number }>(
+    `${LINES}
+     select coalesce(sum(case when amount > 0 then amount else 0 end), 0) as income, coalesce(-sum(case when amount < 0 then amount else 0 end), 0) as expense
+     from lines where date between ? and ?`, [from, to]);
+  return r ?? { income: 0, expense: 0 };
+}
+

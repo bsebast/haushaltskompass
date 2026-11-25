@@ -1,4 +1,5 @@
 import type { Book } from './core';
+import { saveGoal } from './goals';
 import { listCategories, saveAccount, saveBudget, saveRule, saveTransaction, saveTransfer } from './repo';
 import { addMonths, currentMonth, ymd, daysInMonth, today } from '../lib/dates';
 
@@ -67,5 +68,10 @@ export function seedDemo(b: Book) {
     saveBudget(b, { category_id: c('Freizeit'), period: 'month', amount: 15000, valid_from: first });
     saveBudget(b, { category_id: c('Abos & Medien'), period: 'month', amount: 3500, valid_from: first });
     saveBudget(b, { category_id: c('Mobilität'), period: 'month', amount: 20000, valid_from: first });
+
+    const y = Number(end.slice(0, 4)) + 1;
+    saveGoal(b, { name: 'Notgroschen', target: 1500000, target_date: null, saved: 0, account_id: spar, color: 's3', note: 'Drei Monatsausgaben als Reserve' });
+    saveGoal(b, { name: 'Sommerurlaub', target: 250000, target_date: `${y}-07-15`, saved: 90000, account_id: null, color: 's4', note: null });
+    saveGoal(b, { name: 'Neues Fahrrad', target: 120000, target_date: `${y}-04-30`, saved: 30000, account_id: null, color: 's7', note: null });
   });
 }
