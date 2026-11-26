@@ -3,7 +3,7 @@ import schema from './schema.sql?raw';
 import { seedDefaults } from './seed';
 import { now } from '../lib/id';
 
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 /** Migrationen von Version n-1 auf n. Neue Bücher starten mit schema.sql (Version 1) und durchlaufen alle Migrationen. */
 const MIGRATIONS: Record<number, string> = {
@@ -136,6 +136,25 @@ const MIGRATIONS: Record<number, string> = {
       sort_order integer not null default 0,
       created_at text not null, updated_at text not null
     );
+  `,
+  8: `
+    alter table recurring add column term_months integer;
+    alter table recurring add column customer_no text;
+    alter table recurring add column address text;
+    create table collections (
+      id text primary key,
+      name text not null check (length(name) between 1 and 80),
+      note text,
+      color text,
+      archived integer not null default 0,
+      created_at text not null, updated_at text not null
+    );
+    create table collection_links (
+      collection_id text not null references collections(id) on delete cascade,
+      transaction_id text not null references transactions(id) on delete cascade,
+      primary key (collection_id, transaction_id)
+    );
+    create index idx_collection_links_tx on collection_links(transaction_id);
   `,
 };
 

@@ -10,6 +10,7 @@ import {
 import type { Transaction } from '../db/types';
 import { listTxDocuments, updateTxDocuments, MAX_DOC } from '../db/inventory';
 import { openDocument } from '../lib/documents';
+import { listCollections, collectionIds, setTxCollections } from '../db/collections';
 import { today, parseDate, formatDate } from '../lib/dates';
 
 export type TxMode = 'expense' | 'income' | 'transfer';
@@ -43,6 +44,8 @@ export default function TxDialog({ onClose, edit, initialMode = 'expense', initi
   /** Belege: vorhandene (ohne entfernte) und neu gewählte, die beim Speichern angehängt werden */
   const [docs, setDocs] = useState(() => (edit && !edit.transfer_id ? listTxDocuments(book, edit.id) : []));
   const [removedDocs, setRemovedDocs] = useState<string[]>([]);
+  const collections = useMemo(() => listCollections(book, false), [book]);
+  const [colls, setColls] = useState<string[]>(() => (edit && !edit.transfer_id ? collectionIds(book, edit.id) : []));
   const [newDocs, setNewDocs] = useState<{ key: number; filename: string; mime: string; data: Uint8Array }[]>([]);
 
   const pickFiles = async (files: FileList | null) => {
@@ -83,6 +86,7 @@ export default function TxDialog({ onClose, edit, initialMode = 'expense', initi
           splits: splits.length ? splits.map((s) => ({ category_id: s.category_id, amount: sign * (s.amount ?? 0), note: s.note || null })) : undefined,
         });
         updateTxDocuments(book, txId, newDocs, removedDocs);
+        if (collections.length || colls.length) setTxCollections(book, txId, colls);
       }
       if (again) {
         setAmount(null); setPayee(''); setPurpose(''); setNote(''); setCategoryId(null); setSplits([]); setLumpSum(false);
@@ -201,6 +205,20 @@ export default function TxDialog({ onClose, edit, initialMode = 'expense', initi
                 Pauschal (ohne Einzelbeleg)
               </label>
             </div>
+
+            {collections.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Sammlungen">
+                <span className="text-sm font-medium mr-1">Sammlungen</span>
+                {collections.map((c) => {
+                  const on = colls.includes(c.id);
+                  return (
+                    <button key={c.id} type="button" aria-pressed={on}
+                      className={`px-2.5 py-1 rounded-full text-xs border ${on ? 'bg-accent text-on-accent border-accent' : 'border-border text-text-muted hover:bg-surface-2'}`}
+                      onClick={() => setColls(on ? colls.filter((x) => x !== c.id) : [...colls, c.id])}>{c.name}</button>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="rounded-md border border-border p-3">
               <div className="flex items-center justify-between gap-2">

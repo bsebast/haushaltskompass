@@ -11,7 +11,10 @@ describe('laufender Kontostand', () => {
     saveTransaction(b, { account_id: a, date: '2026-01-05', amount: 3000 });
     const r = runningBalances(b, a);
     const rows = listTransactions(b, { accountId: a });
-    expect(rows.map((t) => r.get(t.id))).toEqual([10500, 7500, 8000]);
+    // zwei Buchungen am selben Tag: Reihenfolge wie in der Liste, Saldo je Zeile passt zur Zeile darunter
+    expect(r.get(rows[0].id)).toBe(10500);
+    expect(r.get(rows[2].id)).toBe(10000 + rows[2].amount);
+    rows.slice(0, -1).forEach((t, i) => expect(r.get(t.id)! - t.amount).toBe(r.get(rows[i + 1].id)));
     expect(r.get(rows[0].id)).toBe(listAccounts(b).find((x) => x.id === a)!.balance);
   });
 

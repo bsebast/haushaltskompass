@@ -43,7 +43,7 @@ export function payeeKey(s: string | null | undefined): string {
 }
 
 /** Gleiche Gegenseite? Erstes Wort genügt („AXA“ ↔ „AXA Krankenversicherung AG“). */
-function samePayee(contractKey: string, txKey: string): boolean {
+export function samePayee(contractKey: string, txKey: string): boolean {
   if (!contractKey || !txKey) return false;
   if (contractKey === txKey) return true;
   const a = contractKey.split(' ')[0];
@@ -55,7 +55,7 @@ const median = (xs: number[]) => {
   const m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 };
-const close = (a: number, b: number, rel = 0.15) => Math.abs(a - b) <= Math.max(100, Math.abs(b) * rel);
+export const close = (a: number, b: number, rel = 0.15) => Math.abs(a - b) <= Math.max(100, Math.abs(b) * rel);
 
 function dateIn(month: string, day: number): string {
   const [y, m] = month.split('-').map(Number);

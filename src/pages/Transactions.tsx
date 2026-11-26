@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { Search, Paperclip, Split, ArrowLeftRight, Download, Upload, Landmark } from 'lucide-react';
 import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Empty, Dot } from '../components/ui';
@@ -11,6 +11,7 @@ import { exportCsv } from '../lib/csvExport';
 import { plannedTransactions, type PlannedTx } from '../db/plannedTx';
 import BankImportDialog from '../components/BankImportDialog';
 import BankFetchDialog from '../components/BankFetchDialog';
+import { listCollections, addToCollection, removeFromCollection } from '../db/collections';
 
 type Period = 'month' | 'last' | '3m' | 'year' | 'all';
 const PERIODS: [Period, string][] = [['month', 'Dieser Monat'], ['last', 'Letzter Monat'], ['3m', '3 Monate'], ['year', 'Dieses Jahr'], ['all', 'Alles']];
@@ -36,6 +37,7 @@ export default function Transactions() {
   const [params, setParams] = useSearchParams();
   const accountId = params.get('konto');
   const categoryId = params.get('kategorie');
+  const collectionId = params.get('sammlung');
   const period = (params.get('zeitraum') as Period) ?? 'all';
   const [search, setSearch] = useState(params.get('suche') ?? '');
   const [kind, setKind] = useState<'' | 'income' | 'expense' | 'transfer' | 'open'>('');
@@ -46,14 +48,16 @@ export default function Transactions() {
 
   const accounts = useQuery((b) => listAccounts(b, true));
   const cats = useQuery(listCategories);
+  const collections = useQuery((b) => listCollections(b, false));
+  const collection = collectionId ? collections.find((c) => c.id === collectionId) : undefined;
   const range = periodRange(period);
   const categoryIds = useMemo(() => (categoryId ? descendantIds(cats, categoryId) : undefined), [cats, categoryId]);
   const rows = useQuery(
     (b) => listTransactions(b, {
-      accountId, ...range, search, categoryIds,
+      accountId, ...range, search, categoryIds, collectionId,
       kind: kind && kind !== 'open' ? kind : undefined, uncategorized: kind === 'open',
     }),
-    [accountId, range.from, range.to, search, categoryIds, kind],
+    [accountId, range.from, range.to, search, categoryIds, kind, collectionId],
   );
   const account = accountId ? accounts.find((a) => a.id === accountId) : undefined;
   // Depots: der Kontostand ist ein Kurswert, ein laufender Saldo aus Buchungen wäre irreführend
@@ -129,6 +133,12 @@ export default function Transactions() {
           <option value="transfer">Umbuchungen</option>
           <option value="open">Ohne Kategorie</option>
         </select>
+        {collectionId && (
+          <div className="md:col-span-4 text-sm flex items-center gap-2">
+            Sammlung <strong>{collection?.name ?? '–'}</strong>
+            <button className="text-accent hover:underline" onClick={() => setParam('sammlung', null)}>Filter entfernen</button>
+          </div>
+        )}
         {categoryId && (
           <div className="md:col-span-4 text-sm flex items-center gap-2">
             Gefiltert nach Kategorie <strong>{cats.find((c) => c.id === categoryId)?.name}</strong>
@@ -169,13 +179,21 @@ export default function Transactions() {
           <span className="text-sm font-medium">{selected.size} ausgewählt</span>
           <div className="w-64"><CategorySelect value={null} emptyLabel="Kategorie zuweisen …" ariaLabel="Kategorie zuweisen"
             onChange={(c) => { if (c) { setCategory(book, [...selected], c); setSelected(new Set()); } }} /></div>
+          {collections.length > 0 ? (
+            <select className="input w-56" aria-label="Zu Sammlung hinzufügen" value=""
+              onChange={(e) => { if (e.target.value) { addToCollection(book, e.target.value, [...selected]); setSelected(new Set()); } }}>
+              <option value="">Zu Sammlung hinzufügen …</option>
+              {collections.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          ) : <Link to="/sammlungen" className="text-sm text-accent hover:underline">Sammlung anlegen</Link>}
+          {collectionId && <button className="btn-secondary" onClick={() => { removeFromCollection(book, collectionId, [...selected]); setSelected(new Set()); }}>Aus Sammlung entfernen</button>}
           <button className="btn-ghost" onClick={() => setSelected(new Set())}>Auswahl aufheben</button>
         </div>
       )}
 
       <div className="card overflow-hidden">
         {rows.length === 0 && planned.length === 0 ? (
-          <Empty title="Keine Buchungen gefunden" text={search || accountId || categoryId || period !== 'all' || kind ? 'Passe die Filter an oder lege eine neue Buchung an.' : 'Lege deine erste Buchung an.'}
+          <Empty title="Keine Buchungen gefunden" text={search || accountId || categoryId || collectionId || period !== 'all' || kind ? 'Passe die Filter an oder lege eine neue Buchung an.' : 'Lege deine erste Buchung an.'}
             action={<button className="btn-primary" onClick={() => openNew(undefined, accountId)}>Neue Buchung</button>} />
         ) : (
           <table className="w-full text-sm">

@@ -41,6 +41,11 @@ export interface Contract {
   doc_ref: string | null;
   advisor: string | null;
   death_action: string | null;
+  /** Vertragslaufzeit bzw. Verlängerung in Monaten (leer = wie der Zahlungsrhythmus) */
+  term_months: number | null;
+  customer_no: string | null;
+  /** Anschrift des Anbieters für das Kündigungsschreiben */
+  address: string | null;
   status: 'suggested' | 'confirmed' | 'ended' | 'dismissed';
 }
 
@@ -73,6 +78,9 @@ export interface ContractInput {
   doc_ref?: string | null;
   advisor?: string | null;
   death_action?: string | null;
+  term_months?: number | null;
+  customer_no?: string | null;
+  address?: string | null;
   status?: 'confirmed' | 'ended';
 }
 
@@ -81,17 +89,20 @@ export function saveContract(b: Book, c: ContractInput): string {
   if (!name) throw new Error('Bitte einen Namen für den Vertrag eingeben.');
   if (!Number.isInteger(c.amount) || c.amount === 0) throw new Error('Bitte einen Betrag eingeben.');
   if (c.due_day != null && (c.due_day < 1 || c.due_day > 31)) throw new Error('Der Fälligkeitstag muss zwischen 1 und 31 liegen.');
+  if (c.term_months != null && (!Number.isInteger(c.term_months) || c.term_months < 1 || c.term_months > 120)) throw new Error('Die Laufzeit muss zwischen 1 und 120 Monaten liegen.');
   const months = c.due_months?.length ? normalizeMonths(c.interval, c.due_months).join(',') : null;
   const t = now();
   const vals = [
     name, name, c.person ?? null, c.purpose ?? null, c.kind ?? null, c.category_id ?? null, c.account_id ?? null, c.amount, c.interval,
     c.due_day ?? null, months, c.payment_method ?? null, c.note ?? null, c.start_date ?? null, c.end_date ?? null,
-    c.notice_period ?? null, c.doc_ref ?? null, c.advisor ?? null, c.death_action ?? null, c.status ?? 'confirmed', t,
+    c.notice_period ?? null, c.doc_ref ?? null, c.advisor ?? null, c.death_action ?? null,
+    c.term_months ?? null, c.customer_no?.trim() || null, c.address?.trim() || null, c.status ?? 'confirmed', t,
   ];
   if (c.id) {
     b.run(
       `update recurring set name=?, payee=?, person=?, purpose=?, kind=?, category_id=?, account_id=?, amount=?, interval=?, due_day=?, due_months=?,
-       payment_method=?, note=?, start_date=?, end_date=?, notice_period=?, doc_ref=?, advisor=?, death_action=?, status=?, updated_at=? where id=?`,
+       payment_method=?, note=?, start_date=?, end_date=?, notice_period=?, doc_ref=?, advisor=?, death_action=?,
+       term_months=?, customer_no=?, address=?, status=?, updated_at=? where id=?`,
       [...vals, c.id],
     );
     return c.id;
@@ -99,8 +110,9 @@ export function saveContract(b: Book, c: ContractInput): string {
   const id = uid();
   b.run(
     `insert into recurring (name, payee, person, purpose, kind, category_id, account_id, amount, interval, due_day, due_months,
-      payment_method, note, start_date, end_date, notice_period, doc_ref, advisor, death_action, status, updated_at, id, created_at)
-      values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      payment_method, note, start_date, end_date, notice_period, doc_ref, advisor, death_action, term_months, customer_no, address,
+      status, updated_at, id, created_at)
+      values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [...vals, id, t],
   );
   return id;

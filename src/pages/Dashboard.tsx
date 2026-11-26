@@ -17,6 +17,7 @@ import { listContracts, perMonth, upcoming } from '../db/contracts';
 import { dueIn } from '../db/forecast';
 import { goalColor, goalProgress, listGoals } from '../db/goals';
 import { listAlerts } from '../db/alerts';
+import { upcomingDeadlines, priceChanges } from '../db/contractCheck';
 import { listInventory, warrantyEndingSoon } from '../db/inventory';
 import { formatCents } from '../lib/money';
 
@@ -201,6 +202,8 @@ export default function Dashboard() {
   const fixedThisMonth = -contracts.filter((c) => c.amount < 0 && dueIn(c, m)).reduce((a, c) => a + c.amount, 0);
   const alerts = useQuery(listAlerts);
   const warranties = useQuery((b) => listInventory(b).filter((x) => warrantyEndingSoon(x, 30)));
+  const deadlines = useQuery((b) => upcomingDeadlines(b, 30));
+  const raises = useQuery((b) => priceChanges(b, undefined, 45).filter((x) => x.perYear < 0));
   const { openNew } = useTxDialog();
   const total = accounts.filter((a) => !a.external).reduce((s, a) => s + balanceOf(a.id), 0);
   const drill = useDrill();
@@ -253,7 +256,7 @@ export default function Dashboard() {
         : `${range.label} · Gesamtvermögen am ${formatDate(to)}: ${formatCents(total)}`}
       actions={<PeriodPicker period={period} range={range} firstMonth={firstMonth} onChange={setPeriod} />} />
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 [&>*]:min-w-0">
-      {(alerts.length > 0 || warranties.length > 0) && (
+      {(alerts.length > 0 || warranties.length > 0 || deadlines.length > 0 || raises.length > 0) && (
         <section role="status" className="card p-5 md:col-span-2 xl:col-span-3 border-warning/50 bg-warning/5">
           <h2 className="text-sm font-semibold mb-2">Hinweise</h2>
           <ul className="space-y-1 text-sm">
@@ -266,6 +269,12 @@ export default function Dashboard() {
             ))}
             {warranties.map((x) => (
               <li key={x.id}><Link to="/inventar" className="font-medium hover:underline">{x.name}</Link>: Garantie endet am {formatDate(x.warranty_until!)}</li>
+            ))}
+            {deadlines.map((x) => (
+              <li key={`k-${x.contract.id}`}><Link to="/vertraege" className="font-medium hover:underline">{x.contract.name}{x.contract.purpose ? ` · ${x.contract.purpose}` : ''}</Link>: Kündigung muss bis {formatDate(x.deadline!)} eingehen, sonst verlängert er sich über den {formatDate(x.termEnd!)} hinaus</li>
+            ))}
+            {raises.map((x) => (
+              <li key={`p-${x.contract.id}`}><Link to="/vertraege" className="font-medium hover:underline">{x.contract.name}{x.contract.purpose ? ` · ${x.contract.purpose}` : ''}</Link>: teurer geworden, {formatCents(x.previous)} → {formatCents(x.current)} am {formatDate(x.date)} ({formatCents(Math.abs(x.perYear))} mehr im Jahr)</li>
             ))}
           </ul>
         </section>

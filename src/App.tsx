@@ -17,6 +17,7 @@ import Pensions from './pages/Pensions';
 import Forecast from './pages/Forecast';
 import Inventory from './pages/Inventory';
 import Goals from './pages/Goals';
+import Collections from './pages/Collections';
 import LockScreen from './components/LockScreen';
 import { useIdleLock, useLockState } from './lib/applock';
 
@@ -52,6 +53,7 @@ export default function App() {
         <Route path="vorsorge" element={<Pensions />} />
         <Route path="budgets" element={<Budgets />} />
         <Route path="sparziele" element={<Goals />} />
+        <Route path="sammlungen" element={<Collections />} />
         <Route path="prognose" element={<Forecast />} />
         <Route path="inventar" element={<Inventory />} />
         <Route path="auswertungen" element={<Reports />} />

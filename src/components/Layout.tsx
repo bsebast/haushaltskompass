@@ -1,7 +1,7 @@
 import { DrillProvider } from './DrillDown';
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { NavLink, Outlet, useMatch } from 'react-router-dom';
-import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText, Landmark, Umbrella, TrendingUp, Package, PiggyBank, Sun, Moon, X } from 'lucide-react';
+import { LayoutDashboard, Wallet, ListOrdered, Tags, Wand2, Target, BarChart3, Settings, Plus, Menu, Compass, FileText, Landmark, Umbrella, TrendingUp, Package, PiggyBank, FolderHeart, Sun, Moon, X } from 'lucide-react';
 import { useTheme } from '../lib/theme';
 import { useBookCtx } from '../state';
 import TxDialog, { type TxMode } from './TxDialog';
@@ -26,6 +26,7 @@ const NAV: { title?: string; items: { to: string; label: string; icon: typeof Co
   { title: 'Planen & Auswerten', items: [
     { to: '/budgets', label: 'Budgets', icon: Target },
     { to: '/sparziele', label: 'Sparziele', icon: PiggyBank },
+    { to: '/sammlungen', label: 'Sammlungen', icon: FolderHeart },
     { to: '/prognose', label: 'Prognose', icon: TrendingUp },
     { to: '/auswertungen', label: 'Auswertungen', icon: BarChart3 },
   ] },

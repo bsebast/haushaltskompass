@@ -231,6 +231,8 @@ export interface TxFilter {
   accountIds?: string[];
   /** nur Buchungen, die diesem Vertrag zugeordnet sind */
   recurringId?: string;
+  /** nur Buchungen dieser Sammlung */
+  collectionId?: string | null;
 }
 
 export function listTransactions(b: Book, f: TxFilter = {}): Transaction[] {
@@ -240,6 +242,7 @@ export function listTransactions(b: Book, f: TxFilter = {}): Transaction[] {
   if (f.accountIds) { where.push(`t.account_id in (${f.accountIds.map(() => '?').join(',') || "''"})`); p.push(...f.accountIds); }
   if (f.ids) { where.push(`t.id in (${f.ids.map(() => '?').join(',') || "''"})`); p.push(...f.ids); }
   if (f.recurringId) { where.push('t.recurring_id = ?'); p.push(f.recurringId); }
+  if (f.collectionId) { where.push('exists (select 1 from collection_links l where l.transaction_id = t.id and l.collection_id = ?)'); p.push(f.collectionId); }
   if (f.from) { where.push('t.date >= ?'); p.push(f.from); }
   if (f.to) { where.push('t.date <= ?'); p.push(f.to); }
   if (f.kind === 'income') where.push('t.amount > 0 and t.transfer_id is null');
