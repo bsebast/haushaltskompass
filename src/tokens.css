@@ -17,6 +17,9 @@
   --c-danger: 180 35 24;
   --c-warning: 138 90 0;
   --c-success: 24 122 70;
+  /* Prognose-Buchungen (virtuell, noch nicht gebucht) */
+  --c-planned: 112 118 114;
+  --c-planned-bg: 244 243 238;
   /* Serienfarben für Diagramme (feste Reihenfolge) */
   --c-s1: 42 120 214;
   --c-s2: 235 104 52;
@@ -48,6 +51,8 @@
   --c-danger: 248 113 100;
   --c-warning: 234 179 72;
   --c-success: 88 204 140;
+  --c-planned: 132 142 139;
+  --c-planned-bg: 27 33 35;
   --c-s1: 92 160 240;
   --c-s2: 246 135 88;
   --c-s3: 52 200 146;

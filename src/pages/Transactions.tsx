@@ -6,13 +6,21 @@ import { PageHeader, Money, Empty, Dot } from '../components/ui';
 import CategorySelect from '../components/CategorySelect';
 import { useTxDialog } from '../components/Layout';
 import { listAccounts, listTransactions, runningBalances, listCategories, descendantIds, setCategory } from '../db/repo';
-import { formatDate, monthRange, currentMonth, addMonths } from '../lib/dates';
+import { formatDate, monthRange, currentMonth, addMonths, today } from '../lib/dates';
 import { exportCsv } from '../lib/csvExport';
+import { plannedTransactions, type PlannedTx } from '../db/plannedTx';
 import BankImportDialog from '../components/BankImportDialog';
 import BankFetchDialog from '../components/BankFetchDialog';
 
 type Period = 'month' | 'last' | '3m' | 'year' | 'all';
 const PERIODS: [Period, string][] = [['month', 'Dieser Monat'], ['last', 'Letzter Monat'], ['3m', '3 Monate'], ['year', 'Dieses Jahr'], ['all', 'Alles']];
+
+type Plan = 'aus' | 'monat' | '3m' | '12m';
+const PLANS: [Plan, string][] = [['aus', 'Ohne Prognose'], ['monat', 'Prognose bis Monatsende'], ['3m', 'Prognose 3 Monate'], ['12m', 'Prognose 12 Monate']];
+function planUntil(p: Plan): string | null {
+  if (p === 'aus') return null;
+  return monthRange(addMonths(currentMonth(), p === 'monat' ? 0 : p === '3m' ? 2 : 11)).to;
+}
 
 function periodRange(p: Period): { from?: string; to?: string } {
   const m = currentMonth();
@@ -56,6 +64,31 @@ export default function Transactions() {
       : 0),
     [account?.id, account?.balance_date],
   );
+  const plan = (params.get('prognose') as Plan) ?? '3m';
+  const planTo = (() => {
+    const u = planUntil(plan);
+    if (!u) return null;
+    if (range.to && range.to < u) return range.to < today() ? null : range.to;
+    return u;
+  })();
+  const plannedAll = useQuery(
+    (b) => (running && account && planTo ? plannedTransactions(b, account.id, planTo) : []),
+    [account?.id, planTo, running === null],
+  );
+  const planned = useMemo(() => {
+    const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return plannedAll.filter((p) =>
+      (!kind || (kind === 'income' ? p.amount > 0 && !p.transfer : kind === 'expense' ? p.amount < 0 && !p.transfer : kind === 'transfer' ? p.transfer : false))
+      && (!categoryIds || (!!p.category_id && categoryIds.includes(p.category_id)))
+      && terms.every((t) => `${p.payee ?? ''} ${p.label} ${p.category_name ?? ''}`.toLowerCase().includes(t)));
+  }, [plannedAll, search, kind, categoryIds]);
+  // Saldo der Prognose: vom heutigen Kontostand aus vorwärts (alle Prognose-Buchungen, auch die ausgefilterten)
+  const plannedRun = useMemo(() => {
+    const m = new Map<string, number>();
+    let bal = account?.balance ?? 0;
+    for (const p of plannedAll) { bal += p.amount; m.set(p.id, bal); }
+    return { map: m, end: bal };
+  }, [plannedAll, account?.balance]);
   const sum = rows.reduce((a, r) => a + r.amount, 0);
   const setParam = (k: string, v: string | null) => {
     const p = new URLSearchParams(params);
@@ -110,10 +143,23 @@ export default function Transactions() {
             <div className="text-sm text-text-muted">Kontostand {account.bank ? `${account.bank} · ` : ''}{account.name}</div>
             <Money cents={account.balance} className="text-2xl font-semibold" />
           </div>
-          <div className="text-xs text-text-muted text-right">
-            {account.balance_date
+          {plannedAll.length > 0 && planTo && (
+            <div>
+              <div className="text-sm text-planned">Erwartet am {formatDate(planTo)}</div>
+              <Money cents={plannedRun.end} colored={false} className="text-2xl font-semibold text-planned" />
+            </div>
+          )}
+          <div className="text-xs text-text-muted text-right ml-auto">
+            {running && (
+              <select className="input mb-2 py-1 text-xs w-auto" aria-label="Prognose" value={plan}
+                onChange={(e) => setParam('prognose', e.target.value === '3m' ? null : e.target.value)}>
+                {PLANS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            )}
+            <div>{account.balance_date
               ? <>Stand laut Bank am {formatDate(account.balance_date)}{afterAnchor > 0 ? ` + ${afterAnchor} ${afterAnchor === 1 ? 'Buchung' : 'Buchungen'} danach` : ''}</>
-              : 'Anfangssaldo + alle Buchungen (kein Kontostand von der Bank erfasst)'}
+              : 'Anfangssaldo + alle Buchungen (kein Kontostand von der Bank erfasst)'}</div>
+            {plannedAll.length > 0 && <div className="mt-1">Grau: {plannedAll.length} Prognose-Buchungen aus Verträgen und wiederkehrenden Zahlungen, nicht gebucht</div>}
           </div>
         </div>
       )}
@@ -128,7 +174,7 @@ export default function Transactions() {
       )}
 
       <div className="card overflow-hidden">
-        {rows.length === 0 ? (
+        {rows.length === 0 && planned.length === 0 ? (
           <Empty title="Keine Buchungen gefunden" text={search || accountId || categoryId || period !== 'all' || kind ? 'Passe die Filter an oder lege eine neue Buchung an.' : 'Lege deine erste Buchung an.'}
             action={<button className="btn-primary" onClick={() => openNew(undefined, accountId)}>Neue Buchung</button>} />
         ) : (
@@ -145,6 +191,7 @@ export default function Transactions() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
+              {[...planned].reverse().map((p) => <PlannedRow key={p.id} p={p} saldo={plannedRun.map.get(p.id)!} showAccount={!accountId} />)}
               {rows.slice(0, 1000).map((t) => (
                 <tr key={t.id} className="hover:bg-surface-2 cursor-pointer" onClick={() => openEdit(t)}>
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
@@ -168,7 +215,7 @@ export default function Transactions() {
             </tbody>
             <tfoot>
               <tr className="bg-surface-2">
-                <td colSpan={accountId ? 4 : 5} className="px-3 py-2 text-sm font-medium">Summe der angezeigten Buchungen{rows.length > 1000 ? ' (Liste zeigt die ersten 1.000)' : ''}</td>
+                <td colSpan={accountId ? 4 : 5} className="px-3 py-2 text-sm font-medium">Summe der angezeigten Buchungen{planned.length ? ' (ohne Prognose)' : ''}{rows.length > 1000 ? ' (Liste zeigt die ersten 1.000)' : ''}</td>
                 <td className="px-3 py-2 text-right font-semibold"><Money cents={sum} /></td>
                 {running && <td className="hidden sm:table-cell" />}
               </tr>
@@ -177,6 +224,29 @@ export default function Transactions() {
         )}
       </div>
     </>
+  );
+}
+
+function PlannedRow({ p, saldo, showAccount }: { p: PlannedTx; saldo: number; showAccount: boolean }) {
+  return (
+    <tr className="bg-planned-bg text-planned" title={`Prognose, noch nicht gebucht · ${p.label}`}>
+      <td className="px-3 py-2"><span className="sr-only">Prognose</span></td>
+      <td className="px-2 py-2 tabular-nums whitespace-nowrap">{formatDate(p.date)}</td>
+      <td className="px-2 py-2 max-w-0 w-full">
+        <div className="truncate italic">{p.payee || '–'}</div>
+        <div className="truncate text-xs">Prognose · {p.label}</div>
+      </td>
+      <td className="px-2 py-2 hidden md:table-cell whitespace-nowrap">
+        {p.transfer ? <span className="inline-flex items-center gap-1.5"><ArrowLeftRight size={14} aria-hidden /> Umbuchung</span>
+          : p.category_name ? <span className="inline-flex items-center gap-1.5 opacity-80"><Dot color={p.category_color} />{p.category_name}</span> : '–'}
+      </td>
+      {showAccount && <td className="hidden lg:table-cell" />}
+      <td className="px-3 py-2 text-right italic">
+        <Money cents={p.amount} colored={false} />
+        <div className="sm:hidden text-xs"><Money cents={saldo} colored={false} /></div>
+      </td>
+      <td className="px-3 py-2 text-right hidden sm:table-cell"><Money cents={saldo} colored={false} /></td>
+    </tr>
   );
 }
 
