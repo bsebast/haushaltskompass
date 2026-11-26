@@ -418,3 +418,94 @@ export function moneyFlow(lines: Line[], cats: Category[], maxPerSide = 8): Mone
 export function periodCashflow(b: Book, from: string, to: string): CashflowRow {
   return sumCashflow(cashflow(reportLines(b, { from, to }), periodsBetween(from, to, 'month'), 'month'));
 }
+
+/* ---------- Echte Monatsbilanz (Fix- und Flexkosten) ---------- */
+
+export interface MonthBalance {
+  month: string;
+  /** gebuchte Einnahmen */
+  income: number;
+  /** im laufenden Monat: noch erwartete Einnahmen (Ø der drei Vormonate abzüglich schon gebuchter), sonst 0 */
+  incomeExpected: number;
+  /** Fixkosten aller laufenden Verträge auf den Monat umgerechnet (jährliche Kosten anteilig) */
+  fixed: number;
+  /** im Monat tatsächlich gebuchte Vertragszahlungen */
+  fixedBooked: number;
+  /** alle übrigen Ausgaben (ohne Sparen & Anlegen) */
+  flex: number;
+  /** feste Sparraten laut Verträgen unter Sparen & Anlegen (getrennt von fixed ausgewiesen) */
+  savingPlans: number;
+  /** Ø Flexkosten der drei Vormonate */
+  flexAvg: number;
+  /** Einnahmen (inkl. erwarteter) − umgelegte Fixkosten − feste Sparraten − Flexkosten */
+  free: number;
+  /** nur im laufenden Monat: verbleibende Tage inkl. heute und was davon je Tag noch frei ist */
+  daysLeft: number | null;
+  perDay: number | null;
+}
+
+/**
+ * Markiert Buchungen als Vertragszahlung: verknüpft über recurring_id, oder gleiche Kategorie wie ein Vertrag und
+ * dazu Betrag höchstens 15 % (mindestens 1 €) daneben oder Empfänger enthält den Vertragsnamen
+ * (z. B. zwei Verträge in einer Abbuchung). So zählen nicht verknüpfte Abbuchungen nicht doppelt.
+ */
+function contractMatcher(b: Book): (l: Line) => boolean {
+  const byCat = new Map<string, { amount: number; token: string | null }[]>();
+  for (const c of listContracts(b)) {
+    if (c.amount >= 0 || !c.category_id) continue;
+    const word = c.name.toLowerCase().match(/[a-zäöüß]{3,}/)?.[0] ?? null;
+    byCat.set(c.category_id, [...(byCat.get(c.category_id) ?? []), { amount: c.amount, token: word }]);
+  }
+  return (l) => {
+    if (l.fixed) return true;
+    if (l.amount >= 0 || !l.category_id) return false;
+    const payee = (l.payee ?? '').toLowerCase();
+    return (byCat.get(l.category_id) ?? []).some((c) =>
+      Math.abs(l.amount - c.amount) <= Math.max(100, Math.abs(c.amount) * 0.15) || (!!c.token && payee.includes(c.token)));
+  };
+}
+
+function splitMonth(b: Book, month: string, isFixed: (l: Line) => boolean) {
+  const lines = reportLines(b, monthRange(month));
+  let income = 0, fixedBooked = 0, flex = 0;
+  for (const l of lines) {
+    if (l.kind !== 'expense') { if (l.kind === 'income') income += l.amount; continue; }
+    if (isFixed(l)) fixedBooked -= l.amount; else flex -= l.amount;
+  }
+  return { lines, income, fixedBooked, flex };
+}
+
+/** Buchungszeilen eines Monats, die als Flex- bzw. Fixkosten zählen (für die Detailansicht). */
+export function monthBalanceLines(b: Book, month: string, which: 'flex' | 'fixed'): Line[] {
+  const isFixed = contractMatcher(b);
+  return reportLines(b, monthRange(month)).filter((l) => l.kind === 'expense' && isFixed(l) === (which === 'fixed'));
+}
+
+/**
+ * Monatsbilanz, in der Verträge gleichmäßig je Monat zählen: Eine Jahresversicherung belastet jeden Monat mit 1/12,
+ * statt den Abbuchungsmonat zu verhageln. Was über die tatsächlich gebuchten Vertragszahlungen hinausgeht,
+ * gehört in die Rücklage.
+ */
+export function monthBalance(b: Book, month: string, at = today()): MonthBalance {
+  const { from, to } = monthRange(month);
+  const isFixed = contractMatcher(b);
+  const cur = splitMonth(b, month, isFixed);
+  const saving = savingCategoryIds(listCategories(b));
+  const active = listContracts(b).filter((c) => c.amount < 0 && (!c.start_date || c.start_date <= to) && (!c.end_date || c.end_date >= from));
+  const isSaving = (c: { category_id: string | null }) => !!c.category_id && saving.has(c.category_id);
+  const fixed = -Math.round(active.filter((c) => !isSaving(c)).reduce((a, c) => a + perMonth(c), 0));
+  const savingPlans = -Math.round(active.filter(isSaving).reduce((a, c) => a + perMonth(c), 0));
+  const prev = [1, 2, 3].map((i) => splitMonth(b, addMonths(month, -i), isFixed));
+  const flexAvg = Math.round(prev.reduce((a, p) => a + p.flex, 0) / 3);
+  const incomeAvg = Math.round(prev.reduce((a, p) => a + p.income, 0) / 3);
+  const running = at >= from && at <= to;
+  const incomeExpected = running ? Math.max(0, incomeAvg - cur.income) : 0;
+  const free = cur.income + incomeExpected - fixed - savingPlans - cur.flex;
+  let daysLeft: number | null = null;
+  let perDay: number | null = null;
+  if (running) {
+    daysLeft = Number(to.slice(8, 10)) - Number(at.slice(8, 10)) + 1;
+    perDay = Math.max(0, Math.floor(free / daysLeft));
+  }
+  return { month, income: cur.income, incomeExpected, fixed, fixedBooked: cur.fixedBooked, flex: cur.flex, flexAvg, savingPlans, free, daysLeft, perDay };
+}

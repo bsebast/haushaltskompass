@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Download, Upload, Trash2, Sun, Moon, Monitor } from 'lucide-react';
+import { Download, Upload, Trash2, Sun, Moon, Monitor, Lock } from 'lucide-react';
+import { clearLock, lockNow, setLock, setLockMinutes, useLockState, verifyPin } from '../lib/applock';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { useBook, useBookCtx } from '../state';
 import { PageHeader, ErrorNote, Field } from '../components/ui';
@@ -55,6 +56,7 @@ export default function Settings() {
           </form>
         </section>
         <AppearanceCard />
+        <LockCard />
         <section className="card p-5 space-y-3">
           <h2 className="font-semibold">Datensicherung</h2>
           <p className="text-sm text-text-muted">Deine Daten liegen nur in diesem Browser. Erstelle regelmäßig eine Sicherung, zum Beispiel auf einem USB-Stick oder in deinem Cloud-Ordner.
@@ -127,6 +129,83 @@ function AppearanceCard() {
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+const LOCK_TIMES: [number, string][] = [[0, 'nur beim Öffnen'], [2, 'nach 2 Minuten'], [5, 'nach 5 Minuten'], [10, 'nach 10 Minuten'], [30, 'nach 30 Minuten']];
+
+function LockCard() {
+  const lock = useLockState();
+  const [pin, setPin] = useState('');
+  const [pin2, setPin2] = useState('');
+  const [current, setCurrent] = useState('');
+  const [minutes, setMinutes] = useState(5);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [changing, setChanging] = useState(false);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      if (lock.enabled && !(await verifyPin(current))) throw new Error('Die bisherige PIN stimmt nicht.');
+      if (pin !== pin2) throw new Error('Die beiden Eingaben stimmen nicht überein.');
+      await setLock(pin, lock.enabled ? lock.minutes : minutes);
+      setPin(''); setPin2(''); setCurrent(''); setChanging(false);
+      setMsg({ ok: true, text: lock.enabled ? 'PIN geändert.' : 'App-Sperre ist eingeschaltet.' });
+    } catch (err) { setMsg({ ok: false, text: (err as Error).message }); }
+  };
+  const remove = async () => {
+    setMsg(null);
+    if (!(await verifyPin(current))) { setMsg({ ok: false, text: 'Bitte zum Ausschalten die aktuelle PIN eingeben.' }); return; }
+    clearLock(); setCurrent('');
+    setMsg({ ok: true, text: 'App-Sperre ist ausgeschaltet.' });
+  };
+
+  const pinFields = (
+    <div className="grid sm:grid-cols-2 gap-3">
+      <Field label={lock.enabled ? 'Neue PIN' : 'PIN oder Kennwort'}><input className="input" type="password" autoComplete="new-password" value={pin} onChange={(e) => setPin(e.target.value)} /></Field>
+      <Field label="Wiederholen"><input className="input" type="password" autoComplete="new-password" value={pin2} onChange={(e) => setPin2(e.target.value)} /></Field>
+    </div>
+  );
+
+  return (
+    <section className="card p-5 space-y-3">
+      <h2 className="font-semibold flex items-center gap-2"><Lock size={16} aria-hidden />App-Sperre</h2>
+      <p className="text-sm text-text-muted">Fragt beim Öffnen und nach einer Pause eine PIN ab, damit niemand am PC einfach in deine Finanzen schaut.
+        Die PIN gilt nur in diesem Browser und steckt nicht in der Sicherung. Die Daten selbst werden dadurch nicht verschlüsselt.</p>
+      {!lock.enabled ? (
+        <form onSubmit={save} className="space-y-3">
+          {pinFields}
+          <Field label="Automatisch sperren">
+            <select className="input w-56" value={minutes} onChange={(e) => setMinutes(Number(e.target.value))}>
+              {LOCK_TIMES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}
+            </select>
+          </Field>
+          <button className="btn-primary" type="submit" disabled={!pin}>Sperre einschalten</button>
+        </form>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Automatisch sperren">
+              <select className="input w-56" value={lock.minutes} onChange={(e) => setLockMinutes(Number(e.target.value))}>
+                {LOCK_TIMES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}
+              </select>
+            </Field>
+            <button className="btn-secondary" type="button" onClick={lockNow}><Lock size={16} />Jetzt sperren</button>
+          </div>
+          <form onSubmit={save} className="space-y-3">
+            <Field label="Aktuelle PIN"><input className="input sm:w-64" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
+            {changing && pinFields}
+            <div className="flex flex-wrap gap-2">
+              {changing ? <button className="btn-primary" type="submit" disabled={!pin || !current}>PIN ändern</button>
+                : <button className="btn-secondary" type="button" onClick={() => setChanging(true)}>PIN ändern …</button>}
+              <button className="btn-ghost text-danger" type="button" onClick={() => void remove()} disabled={!current}>Sperre ausschalten</button>
+            </div>
+          </form>
+        </div>
+      )}
+      {msg && <p className={`text-sm ${msg.ok ? 'text-success' : 'text-danger'}`} role="status">{msg.text}</p>}
     </section>
   );
 }

@@ -17,9 +17,14 @@ import Pensions from './pages/Pensions';
 import Forecast from './pages/Forecast';
 import Inventory from './pages/Inventory';
 import Goals from './pages/Goals';
+import LockScreen from './components/LockScreen';
+import { useIdleLock, useLockState } from './lib/applock';
 
 export default function App() {
   const { status, error } = useBookCtx();
+  const lock = useLockState();
+  useIdleLock();
+  if (lock.locked) return <LockScreen />;
   if (status === 'loading') {
     return <div className="h-full grid place-items-center text-text-muted">Haushaltsbuch wird geladen …</div>;
   }

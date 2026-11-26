@@ -130,3 +130,34 @@ export function inventoryCsv(items: InventoryItem[], at = today()): string {
     de(x.warranty_until), x.insurance, x.doc_name, x.note].map(cell).join(';'));
   return [head.join(';'), ...rows].join('\r\n');
 }
+
+/* ---------- Belege an Buchungen ---------- */
+
+export interface TxDocument { id: string; filename: string; mime: string; size: number }
+
+export function listTxDocuments(b: Book, transactionId: string): TxDocument[] {
+  return b.all<TxDocument>(
+    `select d.id, d.filename, d.mime, d.size from document_links l join documents d on d.id = l.document_id
+     where l.transaction_id = ? order by d.created_at`, [transactionId]);
+}
+
+/** Hängt neue Belege an eine Buchung und löst entfernte; nicht mehr benutzte Dateien werden gelöscht. */
+export function updateTxDocuments(b: Book, transactionId: string, add: { filename: string; mime: string; data: Uint8Array }[], removeIds: string[]) {
+  if (!add.length && !removeIds.length) return;
+  b.tx(() => {
+    for (const f of add) {
+      const id = addDocument(b, f.filename, f.mime, f.data);
+      b.run('insert into document_links (document_id, transaction_id) values (?, ?)', [id, transactionId]);
+    }
+    for (const id of removeIds) {
+      b.run('delete from document_links where document_id = ? and transaction_id = ?', [id, transactionId]);
+      removeDocumentIfUnused(b, id);
+    }
+  });
+}
+
+/** Löscht Belege, die an keiner Buchung und keinem Inventar mehr hängen (z. B. nach dem Löschen einer Buchung). */
+export function purgeOrphanDocuments(b: Book) {
+  b.run(`delete from documents where id not in (select document_id from document_links)
+         and id not in (select document_id from inventory where document_id is not null)`);
+}

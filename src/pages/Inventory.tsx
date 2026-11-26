@@ -4,7 +4,7 @@ import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Modal, Field, ErrorNote, Empty } from '../components/ui';
 import AmountInput from '../components/AmountInput';
 import {
-  listInventory, saveInventory, deleteInventory, addDocument, getDocument, removeDocumentIfUnused, valueOf, inventoryTotals, warrantyEndingSoon,
+  listInventory, saveInventory, deleteInventory, addDocument, removeDocumentIfUnused, valueOf, inventoryTotals, warrantyEndingSoon,
   inventoryInWealth, setInventoryInWealth, inventoryCsv, MAX_DOC, type InventoryItem,
 } from '../db/inventory';
 import { formatDate, today } from '../lib/dates';
@@ -13,14 +13,7 @@ import { download } from '../lib/csvExport';
 type Group = 'room' | 'category' | 'owner';
 const GROUP_LABEL: Record<Group, string> = { room: 'Raum', category: 'Kategorie', owner: 'Person' };
 
-export function openDocument(b: ReturnType<typeof useBook>, id: string) {
-  const d = getDocument(b, id);
-  if (!d) return;
-  const url = URL.createObjectURL(new Blob([d.data as BlobPart], { type: d.mime }));
-  const w = window.open(url, '_blank');
-  if (!w) download(d.filename, d.data as BlobPart, d.mime);
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-}
+import { openDocument } from '../lib/documents';
 
 export default function Inventory() {
   const book = useBook();

@@ -506,6 +506,9 @@ export function deleteTransaction(b: Book, id: string) {
     const tx = b.get<{ transfer_id: string | null }>('select transfer_id from transactions where id = ?', [id]);
     if (tx?.transfer_id) b.run('delete from transactions where transfer_id = ?', [tx.transfer_id]);
     else b.run('delete from transactions where id = ?', [id]);
+    // angehängte Belege, die sonst nirgends hängen, mit löschen
+    b.run(`delete from documents where id not in (select document_id from document_links)
+           and id not in (select document_id from inventory where document_id is not null)`);
   });
 }
 

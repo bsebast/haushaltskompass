@@ -12,7 +12,7 @@ import { formatPeriod, parsePeriod, periodRange, previousRange, shiftPeriod, swi
 import { ACCOUNT_TYPES } from '../db/types';
 import { useTxDialog } from '../components/Layout';
 import { DrillCell, useDrill, partsFromLines, partsFromTx } from '../components/DrillDown';
-import { periodCashflow, reportLines } from '../db/analytics';
+import { monthBalance, monthBalanceLines, periodCashflow, reportLines, type MonthBalance } from '../db/analytics';
 import { listContracts, perMonth, upcoming } from '../db/contracts';
 import { dueIn } from '../db/forecast';
 import { goalColor, goalProgress, listGoals } from '../db/goals';
@@ -156,6 +156,7 @@ export default function Dashboard() {
   const { from, to, fromMonth, toMonth } = range;
   const firstMonth = useQuery((b) => (b.value<string>('select min(date) from transactions') ?? today()).slice(0, 7));
   const leftMonth = useQuery((b) => monthLeft(b, m), [m]);
+  const balance = useQuery((b) => (isMonth ? monthBalance(b, m) : null), [isMonth, m]);
   // YTD zählt nur Buchungen bis heute (bzw. Jahresende), der Monatsmodus wie bisher den ganzen Monat
   const ytdTotals = useQuery((b) => {
     if (isMonth) return null;
@@ -289,6 +290,9 @@ export default function Dashboard() {
         )}
         {open > 0 && <p className="text-xs mt-2"><Link to="/buchungen" className="text-warning hover:underline">{open} Buchungen ohne Kategorie</Link></p>}
       </Card>
+      {balance && (balance.fixed > 0 || balance.flex > 0) && <MonthBalanceCard v={balance} label={range.label}
+        onFlex={() => drill({ title: `Flexkosten · ${range.label}`, load: (b) => partsFromLines(monthBalanceLines(b, m, 'flex')) })}
+        onFixed={() => drill({ title: `Gebuchte Fixkosten · ${range.label}`, load: (b) => partsFromLines(monthBalanceLines(b, m, 'fixed')) })} />}
 
       <Card title={range.current ? 'Konten' : `Konten am ${formatDate(to)}`} link={['/konten', 'Alle Konten']}>
         <ul className="space-y-2">
@@ -398,5 +402,52 @@ export default function Dashboard() {
       </Card>
     </div>
     </>
+  );
+}
+
+/**
+ * Echte Monatsbilanz: Verträge zählen jeden Monat mit ihrem Monatsanteil (Jahresbeiträge also mit 1/12),
+ * alles andere sind Flexkosten. Was übrig bleibt, wird im laufenden Monat auf die restlichen Tage verteilt.
+ */
+function MonthBalanceCard({ v, label, onFlex, onFixed }: { v: MonthBalance; label: string; onFlex: () => void; onFixed: () => void }) {
+  const reserve = v.fixed - v.fixedBooked;
+  const flexShare = v.flexAvg > 0 ? v.flex / v.flexAvg : null;
+  return (
+    <Card title={`Echte Monatsbilanz · ${label}`} link={['/vertraege', 'Verträge']}>
+      <div className="text-text-muted text-xs">{v.daysLeft !== null ? 'Noch frei verfügbar' : 'Frei geblieben'}</div>
+      <div className="text-4xl font-semibold mt-1"><Money cents={v.free} /></div>
+      {v.perDay !== null && v.daysLeft !== null && (
+        <p className="text-sm mt-1">
+          {v.free > 0 ? <>Das sind <Money cents={v.perDay} colored={false} className="font-semibold" /> pro Tag für die restlichen {v.daysLeft} {v.daysLeft === 1 ? 'Tag' : 'Tage'}.</>
+            : <span className="text-danger">Die Flexkosten liegen schon über dem, was nach den Fixkosten übrig war.</span>}
+        </p>
+      )}
+      <dl className="mt-3 space-y-1 text-sm">
+        <div className="flex justify-between"><dt className="text-text-muted">Einnahmen</dt><dd><Money cents={v.income} colored={false} /></dd></div>
+        {v.incomeExpected > 0 && (
+          <div className="flex justify-between"><dt className="text-text-muted" title="Noch nicht gebucht: Durchschnitt der Einnahmen der letzten 3 Monate abzüglich der schon gebuchten">+ noch erwartet</dt>
+            <dd><Money cents={v.incomeExpected} colored={false} /></dd></div>
+        )}
+        <div className="flex justify-between"><dt className="text-text-muted" title="Alle laufenden Verträge auf den Monat umgerechnet, jährliche und vierteljährliche anteilig">− Fixkosten (umgelegt)</dt>
+          <dd><Money cents={-v.fixed} colored={false} /></dd></div>
+        {v.savingPlans > 0 && (
+          <div className="flex justify-between"><dt className="text-text-muted" title="Verträge unter Sparen & Anlegen, z. B. Sparpläne und Rücklagen. Wer sich zuerst selbst bezahlt, plant sie wie Fixkosten ein.">− feste Sparraten</dt>
+            <dd><Money cents={-v.savingPlans} colored={false} /></dd></div>
+        )}
+        <div className="flex justify-between"><dt className="text-text-muted" title="Alle Ausgaben, die zu keinem Vertrag gehören (ohne Sparen & Anlegen und ohne Umbuchungen)">− Flexkosten</dt>
+          <dd><DrillCell onClick={onFlex}><Money cents={-v.flex} colored={false} /></DrillCell></dd></div>
+      </dl>
+      {flexShare !== null && (
+        <div className="mt-3">
+          <Bar ratio={Math.min(1, flexShare)} state={flexShare > 1 ? 'over' : flexShare > 0.9 ? 'warn' : 'ok'} />
+          <p className="text-xs text-text-muted mt-1">Flexkosten: {Math.round(flexShare * 100)} % vom Schnitt der letzten 3 Monate (<Money cents={v.flexAvg} colored={false} />)</p>
+        </div>
+      )}
+      <p className="text-xs text-text-muted mt-2">
+        Gebucht wurden <DrillCell onClick={onFixed}><Money cents={v.fixedBooked} colored={false} /></DrillCell> Fixkosten.{' '}
+        {reserve > 0 ? <>Die übrigen <Money cents={reserve} colored={false} /> gehören in die Rücklage für spätere Abbuchungen.</>
+          : reserve < 0 ? <><Money cents={-reserve} colored={false} /> mehr als der Monatsanteil, das kommt aus der Rücklage.</> : null}
+      </p>
+    </Card>
   );
 }

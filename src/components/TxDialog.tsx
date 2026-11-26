@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Paperclip } from 'lucide-react';
 import { useBook, useQuery } from '../state';
 import { Modal, Field, ErrorNote, Money } from './ui';
 import AmountInput from './AmountInput';
@@ -8,6 +8,8 @@ import {
   listAccounts, saveTransaction, saveTransfer, linkCounterpart, getSplits, getTransfer, deleteTransaction, payeeSuggestions,
 } from '../db/repo';
 import type { Transaction } from '../db/types';
+import { listTxDocuments, updateTxDocuments, MAX_DOC } from '../db/inventory';
+import { openDocument } from '../lib/documents';
 import { today, parseDate, formatDate } from '../lib/dates';
 
 export type TxMode = 'expense' | 'income' | 'transfer';
@@ -38,6 +40,20 @@ export default function TxDialog({ onClose, edit, initialMode = 'expense', initi
       : [],
   );
   const [error, setError] = useState<string | null>(null);
+  /** Belege: vorhandene (ohne entfernte) und neu gewählte, die beim Speichern angehängt werden */
+  const [docs, setDocs] = useState(() => (edit && !edit.transfer_id ? listTxDocuments(book, edit.id) : []));
+  const [removedDocs, setRemovedDocs] = useState<string[]>([]);
+  const [newDocs, setNewDocs] = useState<{ key: number; filename: string; mime: string; data: Uint8Array }[]>([]);
+
+  const pickFiles = async (files: FileList | null) => {
+    if (!files) return;
+    const added: { key: number; filename: string; mime: string; data: Uint8Array }[] = [];
+    for (const f of Array.from(files)) {
+      if (f.size > MAX_DOC) { setError(`„${f.name}“ ist größer als 20 MB.`); continue; }
+      added.push({ key: Date.now() + Math.random(), filename: f.name, mime: f.type || 'application/octet-stream', data: new Uint8Array(await f.arrayBuffer()) });
+    }
+    setNewDocs((d) => [...d, ...added]);
+  };
 
   const splitSum = splits.reduce((a, s) => a + (s.amount ?? 0), 0);
   const kind = mode === 'income' ? 'income' : 'expense';
@@ -59,16 +75,18 @@ export default function TxDialog({ onClose, edit, initialMode = 'expense', initi
       } else {
         const sign = mode === 'expense' ? -1 : 1;
         if (edit?.transfer_id) deleteTransaction(book, edit.id);
-        saveTransaction(book, {
+        const txId = saveTransaction(book, {
           id: edit && !edit.transfer_id ? edit.id : undefined,
           account_id: accountId, date, amount: sign * amount,
           payee: payee.trim() || null, purpose: purpose.trim() || null, note: note.trim() || null,
           category_id: categoryId, is_lump_sum: lumpSum,
           splits: splits.length ? splits.map((s) => ({ category_id: s.category_id, amount: sign * (s.amount ?? 0), note: s.note || null })) : undefined,
         });
+        updateTxDocuments(book, txId, newDocs, removedDocs);
       }
       if (again) {
         setAmount(null); setPayee(''); setPurpose(''); setNote(''); setCategoryId(null); setSplits([]); setLumpSum(false);
+        setDocs([]); setNewDocs([]); setRemovedDocs([]);
         (document.getElementById('tx-amount') as HTMLInputElement | null)?.focus();
       } else onClose();
     } catch (e) {
@@ -182,6 +200,34 @@ export default function TxDialog({ onClose, edit, initialMode = 'expense', initi
                 <input type="checkbox" checked={lumpSum} onChange={(e) => setLumpSum(e.target.checked)} />
                 Pauschal (ohne Einzelbeleg)
               </label>
+            </div>
+
+            <div className="rounded-md border border-border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">Belege</span>
+                <label className="btn-ghost h-8 cursor-pointer"><Paperclip size={16} />Datei anhängen
+                  <input type="file" multiple accept="image/*,application/pdf" className="sr-only"
+                    onChange={(e) => { pickFiles(e.target.files); e.target.value = ''; }} />
+                </label>
+              </div>
+              {(docs.length > 0 || newDocs.length > 0) ? (
+                <ul className="mt-2 space-y-1 text-sm">
+                  {docs.map((d) => (
+                    <li key={d.id} className="flex items-center gap-2">
+                      <Paperclip size={14} aria-hidden />
+                      <button type="button" className="text-accent hover:underline truncate" onClick={() => openDocument(book, d.id)}>{d.filename}</button>
+                      <button type="button" className="text-xs text-danger hover:underline ml-auto"
+                        onClick={() => { setDocs((all) => all.filter((x) => x.id !== d.id)); setRemovedDocs((r) => [...r, d.id]); }}>entfernen</button>
+                    </li>
+                  ))}
+                  {newDocs.map((d) => (
+                    <li key={d.key} className="flex items-center gap-2">
+                      <Paperclip size={14} aria-hidden /><span className="truncate">{d.filename}</span><span className="text-xs text-text-muted">neu</span>
+                      <button type="button" className="text-xs text-danger hover:underline ml-auto" onClick={() => setNewDocs((all) => all.filter((x) => x.key !== d.key))}>entfernen</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : <p className="text-xs text-text-muted mt-1">Kassenzettel, Rechnung oder Quittung als Bild oder PDF. Die Datei wird in der Sicherung mitgespeichert.</p>}
             </div>
           </>
         )}
