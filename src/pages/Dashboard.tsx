@@ -431,7 +431,7 @@ function MonthBalanceCard({ v, label, onFlex, onFixed }: { v: MonthBalance; labe
         <div className="flex justify-between"><dt className="text-text-muted" title="Alle laufenden Verträge auf den Monat umgerechnet, jährliche und vierteljährliche anteilig">− Fixkosten (umgelegt)</dt>
           <dd><Money cents={-v.fixed} colored={false} /></dd></div>
         {v.savingPlans > 0 && (
-          <div className="flex justify-between"><dt className="text-text-muted" title="Verträge unter Sparen & Anlegen, z. B. Sparpläne und Rücklagen. Wer sich zuerst selbst bezahlt, plant sie wie Fixkosten ein.">− feste Sparraten</dt>
+          <div className="flex justify-between"><dt className="text-text-muted" title="Verträge unter Sparen & Anlegen, z. B. Sparpläne. Rücklagen für Jahresrechnungen zählen nicht, die stecken schon in den umgelegten Fixkosten.">− feste Sparraten</dt>
             <dd><Money cents={-v.savingPlans} colored={false} /></dd></div>
         )}
         <div className="flex justify-between"><dt className="text-text-muted" title="Alle Ausgaben, die zu keinem Vertrag gehören (ohne Sparen & Anlegen und ohne Umbuchungen)">− Flexkosten</dt>

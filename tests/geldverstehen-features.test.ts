@@ -13,6 +13,7 @@ describe('Echte Monatsbilanz', () => {
     const strom = saveContract(b, { name: 'Strom', amount: -6000, interval: 'monthly', category_id: cat('Strom'), status: 'confirmed' });
     saveContract(b, { name: 'Hausrat', amount: -12000, interval: 'yearly', status: 'confirmed' });
     saveContract(b, { name: 'Sparplan', amount: -10000, interval: 'monthly', category_id: cat('Sparen & Anlegen'), status: 'confirmed' });
+    saveContract(b, { name: 'Rücklagen Jahresrechnungen', amount: -40000, interval: 'monthly', category_id: cat('Sparen & Anlegen'), status: 'confirmed' });
     saveContract(b, { name: 'Alt', amount: -99999, interval: 'monthly', status: 'confirmed', end_date: '2026-09-30' });
     const tx = (date: string, amount: number, category: string, extra: Record<string, unknown> = {}) =>
       saveTransaction(b, { account_id: giro, date, amount, payee: category, category_id: cat(category), autoCategorize: false, ...extra });
@@ -27,7 +28,7 @@ describe('Echte Monatsbilanz', () => {
     expect(v.fixed).toBe(6000 + 1000); // Hausrat 120 €/Jahr = 10 €/Monat, beendeter Vertrag zählt nicht
     expect(v.fixedBooked).toBe(6000);
     expect(v.flex).toBe(45000); // Sparen zählt nicht als Flexkosten
-    expect(v.savingPlans).toBe(10000); // Sparverträge zählen nicht als Fixkosten
+    expect(v.savingPlans).toBe(10000); // Sparverträge zählen nicht als Fixkosten, die Rücklage gar nicht (Umlage deckt sie ab)
     expect(v.flexAvg).toBe(30000);
     expect(v.incomeExpected).toBe(0); // Vormonate ohne Einnahmen
     expect(v.free).toBe(250000 - 7000 - 10000 - 45000);

@@ -433,7 +433,7 @@ export interface MonthBalance {
   fixedBooked: number;
   /** alle übrigen Ausgaben (ohne Sparen & Anlegen) */
   flex: number;
-  /** feste Sparraten laut Verträgen unter Sparen & Anlegen (getrennt von fixed ausgewiesen) */
+  /** feste Sparraten laut Verträgen unter Sparen & Anlegen (getrennt von fixed ausgewiesen; Rücklagen-Verträge zählen nicht, die Umlage deckt sie ab) */
   savingPlans: number;
   /** Ø Flexkosten der drei Vormonate */
   flexAvg: number;
@@ -492,8 +492,10 @@ export function monthBalance(b: Book, month: string, at = today()): MonthBalance
   const cur = splitMonth(b, month, isFixed);
   const saving = savingCategoryIds(listCategories(b));
   const active = listContracts(b).filter((c) => c.amount < 0 && (!c.start_date || c.start_date <= to) && (!c.end_date || c.end_date >= from));
-  const isSaving = (c: { category_id: string | null }) => !!c.category_id && saving.has(c.category_id);
-  const fixed = -Math.round(active.filter((c) => !isSaving(c)).reduce((a, c) => a + perMonth(c), 0));
+  // Rücklagen für Jahresrechnungen sind dasselbe Geld wie die umgelegten Jahresverträge, also nicht noch einmal abziehen
+  const isReserve = (c: { name: string }) => /r(ü|ue)cklage/i.test(c.name);
+  const isSaving = (c: { category_id: string | null; name: string }) => !!c.category_id && saving.has(c.category_id) && !isReserve(c);
+  const fixed = -Math.round(active.filter((c) => !isSaving(c) && !isReserve(c)).reduce((a, c) => a + perMonth(c), 0));
   const savingPlans = -Math.round(active.filter(isSaving).reduce((a, c) => a + perMonth(c), 0));
   const prev = [1, 2, 3].map((i) => splitMonth(b, addMonths(month, -i), isFixed));
   const flexAvg = Math.round(prev.reduce((a, p) => a + p.flex, 0) / 3);
