@@ -276,9 +276,69 @@ export function listTransactions(b: Book, f: TxFilter = {}): Transaction[] {
     join accounts a on a.id = t.account_id
     left join categories c on c.id = t.category_id
     ${where.length ? 'where ' + where.join(' and ') : ''}
-    order by t.date desc, t.created_at desc
+    order by t.date desc, t.created_at desc, t.id desc
     ${f.limit ? `limit ${Math.floor(f.limit)}` : ''}`;
   return b.all<Transaction>(sql, p);
+}
+
+/**
+ * Laufender Kontostand nach jeder Buchung eines Kontos, wie im Kontoauszug.
+ * Gleiche Rechnung wie listAccounts/balancesAt: Tagesendstand = letzter Kontostand (Snapshot) ≤ Tag + Buchungen danach,
+ * am Snapshot-Tag zählen nur die automatisch ergänzten Gegenbuchungen dazu. Vor dem ersten Snapshot wird vom ersten
+ * Snapshot rückwärts gerechnet, ohne Snapshot vom Anfangssaldo vorwärts. Innerhalb eines Tages gilt die Reihenfolge
+ * der Liste (älteste zuerst), die neueste Buchung des Tages trägt den Tagesendstand.
+ */
+export function runningBalances(b: Book, accountId: string): Map<string, number> {
+  const acc = b.get<{ opening_balance: number }>('select opening_balance from accounts where id = ?', [accountId]);
+  const out = new Map<string, number>();
+  if (!acc) return out;
+  const tx = b.all<{ id: string; date: string; amount: number; auto: number }>(
+    'select id, date, amount, auto_counterpart as auto from transactions where account_id = ? order by date, created_at, id', [accountId]);
+  const snaps = b.all<{ date: string; balance: number }>('select date, balance from balance_snapshots where account_id = ? order by date', [accountId]);
+  // Buchungssummen je Tag (alle und nur automatische Gegenbuchungen)
+  const days: string[] = [];
+  const daySum = new Map<string, number>();
+  const dayAuto = new Map<string, number>();
+  for (const t of tx) {
+    if (!daySum.has(t.date)) { days.push(t.date); daySum.set(t.date, 0); dayAuto.set(t.date, 0); }
+    daySum.set(t.date, daySum.get(t.date)! + t.amount);
+    if (t.auto) dayAuto.set(t.date, dayAuto.get(t.date)! + t.amount);
+  }
+  const endOfDay = new Map<string, number>();
+  if (!snaps.length) {
+    let bal = acc.opening_balance;
+    for (const d of days) { bal += daySum.get(d)!; endOfDay.set(d, bal); }
+  } else {
+    let si = -1;
+    let bal = 0;
+    for (const d of days) {
+      let moved = false;
+      while (si + 1 < snaps.length && snaps[si + 1].date <= d) { si++; moved = true; }
+      if (si < 0) continue; // vor dem ersten Snapshot: unten rückwärts
+      if (moved) {
+        const s = snaps[si];
+        bal = s.balance + (s.date === d ? dayAuto.get(d)! : daySum.get(d)!);
+      } else bal += daySum.get(d)!;
+      endOfDay.set(d, bal);
+    }
+    // vor dem ersten Snapshot rückwärts rechnen: Stand am Vortag = Stand am Tag − Buchungen des Tages
+    const first = snaps[0];
+    let back = first.balance - (daySum.get(first.date) ?? 0) + (dayAuto.get(first.date) ?? 0); // Stand vor allen Buchungen bis zum Snapshot-Tag
+    // back ist jetzt der Stand am Ende des letzten Tages vor first.date
+    for (let i = days.length - 1; i >= 0; i--) {
+      const d = days[i];
+      if (d >= first.date) continue;
+      endOfDay.set(d, back);
+      back -= daySum.get(d)!;
+    }
+  }
+  // je Tag von der neuesten Buchung rückwärts
+  for (let i = tx.length - 1; i >= 0; ) {
+    const d = tx[i].date;
+    let bal = endOfDay.get(d)!;
+    for (; i >= 0 && tx[i].date === d; i--) { out.set(tx[i].id, bal); bal -= tx[i].amount; }
+  }
+  return out;
 }
 
 export function getSplits(b: Book, txId: string): Split[] {

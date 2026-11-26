@@ -5,7 +5,7 @@ import { useBook, useQuery } from '../state';
 import { PageHeader, Money, Empty, Dot } from '../components/ui';
 import CategorySelect from '../components/CategorySelect';
 import { useTxDialog } from '../components/Layout';
-import { listAccounts, listTransactions, listCategories, descendantIds, setCategory } from '../db/repo';
+import { listAccounts, listTransactions, runningBalances, listCategories, descendantIds, setCategory } from '../db/repo';
 import { formatDate, monthRange, currentMonth, addMonths } from '../lib/dates';
 import { exportCsv } from '../lib/csvExport';
 import BankImportDialog from '../components/BankImportDialog';
@@ -46,6 +46,15 @@ export default function Transactions() {
       kind: kind && kind !== 'open' ? kind : undefined, uncategorized: kind === 'open',
     }),
     [accountId, range.from, range.to, search, categoryIds, kind],
+  );
+  const account = accountId ? accounts.find((a) => a.id === accountId) : undefined;
+  // Depots: der Kontostand ist ein Kurswert, ein laufender Saldo aus Buchungen wäre irreführend
+  const running = useQuery((b) => (account && account.type !== 'depot' ? runningBalances(b, account.id) : null), [account?.id, account?.type]);
+  const afterAnchor = useQuery(
+    (b) => (account?.balance_date
+      ? b.get<{ n: number }>('select count(*) n from transactions where account_id = ? and date > ?', [account.id, account.balance_date])?.n ?? 0
+      : 0),
+    [account?.id, account?.balance_date],
   );
   const sum = rows.reduce((a, r) => a + r.amount, 0);
   const setParam = (k: string, v: string | null) => {
@@ -95,6 +104,20 @@ export default function Transactions() {
         )}
       </div>
 
+      {account && (
+        <div className="card p-4 mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-sm text-text-muted">Kontostand {account.bank ? `${account.bank} · ` : ''}{account.name}</div>
+            <Money cents={account.balance} className="text-2xl font-semibold" />
+          </div>
+          <div className="text-xs text-text-muted text-right">
+            {account.balance_date
+              ? <>Stand laut Bank am {formatDate(account.balance_date)}{afterAnchor > 0 ? ` + ${afterAnchor} ${afterAnchor === 1 ? 'Buchung' : 'Buchungen'} danach` : ''}</>
+              : 'Anfangssaldo + alle Buchungen (kein Kontostand von der Bank erfasst)'}
+          </div>
+        </div>
+      )}
+
       {selected.size > 0 && (
         <div className="card p-3 mb-3 flex flex-wrap items-center gap-3 bg-accent-soft">
           <span className="text-sm font-medium">{selected.size} ausgewählt</span>
@@ -118,6 +141,7 @@ export default function Transactions() {
                 <th className="text-left px-2 py-2 font-medium hidden md:table-cell">Kategorie</th>
                 {!accountId && <th className="text-left px-2 py-2 font-medium hidden lg:table-cell">Konto</th>}
                 <th className="text-right px-3 py-2 font-medium">Betrag</th>
+                {running && <th className="text-right px-3 py-2 font-medium hidden sm:table-cell">Saldo</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -134,7 +158,11 @@ export default function Transactions() {
                   </td>
                   <td className="px-2 py-2 hidden md:table-cell whitespace-nowrap"><CatLabel t={t} /></td>
                   {!accountId && <td className="px-2 py-2 hidden lg:table-cell text-text-muted whitespace-nowrap">{t.account_name}</td>}
-                  <td className="px-3 py-2 text-right font-medium"><Money cents={t.amount} colored={!t.transfer_id} /></td>
+                  <td className="px-3 py-2 text-right font-medium">
+                    <Money cents={t.amount} colored={!t.transfer_id} />
+                    {running?.has(t.id) && <div className="sm:hidden text-xs text-text-muted font-normal"><Money cents={running.get(t.id)!} colored={false} /></div>}
+                  </td>
+                  {running && <td className="px-3 py-2 text-right hidden sm:table-cell text-text-muted">{running.has(t.id) && <Money cents={running.get(t.id)!} colored={false} />}</td>}
                 </tr>
               ))}
             </tbody>
@@ -142,6 +170,7 @@ export default function Transactions() {
               <tr className="bg-surface-2">
                 <td colSpan={accountId ? 4 : 5} className="px-3 py-2 text-sm font-medium">Summe der angezeigten Buchungen{rows.length > 1000 ? ' (Liste zeigt die ersten 1.000)' : ''}</td>
                 <td className="px-3 py-2 text-right font-semibold"><Money cents={sum} /></td>
+                {running && <td className="hidden sm:table-cell" />}
               </tr>
             </tfoot>
           </table>
