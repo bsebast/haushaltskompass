@@ -1,7 +1,7 @@
 import type { Book } from './core';
 import type { AccountType } from './types';
 import { listAccounts } from './repo';
-import { listContracts, normalizeMonths, perMonth, type Contract } from './contracts';
+import { listContracts, normalizeMonths, perMonth, amountAt, type Contract } from './contracts';
 import { addMonths, currentMonth } from '../lib/dates';
 import { uid } from '../lib/id';
 
@@ -199,7 +199,9 @@ export function contractDelta(c: Contract, month: string, historyMonths: string[
   const e = ym(c.end_date);
   // im Rückblick enthalten, wenn er in dieser Zeit lief
   const inHistory = !!hs && (!s || s <= he) && (!e || e >= hs);
-  return (dueIn(c, month) ? c.amount : 0) - (inHistory ? perMonth(c) : 0);
+  // Durchschnitt enthält den bisherigen Betrag, ab Gültig-ab zählt der neue
+  const day = String(c.due_day ?? 1).padStart(2, '0');
+  return (dueIn(c, month) ? amountAt(c, `${month}-${day}`) : 0) - (inHistory ? perMonth(c) : 0);
 }
 
 function adjActive(a: Adjustment, month: string): boolean {

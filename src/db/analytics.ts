@@ -495,8 +495,8 @@ export function monthBalance(b: Book, month: string, at = today()): MonthBalance
   // Rücklagen für Jahresrechnungen sind dasselbe Geld wie die umgelegten Jahresverträge, also nicht noch einmal abziehen
   const isReserve = (c: { name: string }) => /r(ü|ue)cklage/i.test(c.name);
   const isSaving = (c: { category_id: string | null; name: string }) => !!c.category_id && saving.has(c.category_id) && !isReserve(c);
-  const fixed = -Math.round(active.filter((c) => !isSaving(c) && !isReserve(c)).reduce((a, c) => a + perMonth(c), 0));
-  const savingPlans = -Math.round(active.filter(isSaving).reduce((a, c) => a + perMonth(c), 0));
+  const fixed = -Math.round(active.filter((c) => !isSaving(c) && !isReserve(c)).reduce((a, c) => a + perMonth(c, month), 0));
+  const savingPlans = -Math.round(active.filter(isSaving).reduce((a, c) => a + perMonth(c, month), 0));
   const prev = [1, 2, 3].map((i) => splitMonth(b, addMonths(month, -i), isFixed));
   const flexAvg = Math.round(prev.reduce((a, p) => a + p.flex, 0) / 3);
   const incomeAvg = Math.round(prev.reduce((a, p) => a + p.income, 0) / 3);

@@ -46,6 +46,9 @@ export interface Contract {
   customer_no: string | null;
   /** Anschrift des Anbieters für das Kündigungsschreiben */
   address: string | null;
+  /** angekündigter neuer Betrag (Cent, Vorzeichen wie amount) und ab wann er gilt */
+  next_amount: number | null;
+  next_amount_from: string | null;
   status: 'suggested' | 'confirmed' | 'ended' | 'dismissed';
 }
 
@@ -81,6 +84,8 @@ export interface ContractInput {
   term_months?: number | null;
   customer_no?: string | null;
   address?: string | null;
+  next_amount?: number | null;
+  next_amount_from?: string | null;
   status?: 'confirmed' | 'ended';
 }
 
@@ -89,6 +94,9 @@ export function saveContract(b: Book, c: ContractInput): string {
   if (!name) throw new Error('Bitte einen Namen für den Vertrag eingeben.');
   if (!Number.isInteger(c.amount) || c.amount === 0) throw new Error('Bitte einen Betrag eingeben.');
   if (c.due_day != null && (c.due_day < 1 || c.due_day > 31)) throw new Error('Der Fälligkeitstag muss zwischen 1 und 31 liegen.');
+  if ((c.next_amount != null) !== !!c.next_amount_from) throw new Error('Für die Beitragsänderung bitte neuen Betrag und Gültig-ab-Datum angeben.');
+  if (c.next_amount != null && (!Number.isInteger(c.next_amount) || c.next_amount === 0)) throw new Error('Der neue Betrag ist ungültig.');
+  if (c.next_amount_from && !/^\d{4}-\d{2}-\d{2}$/.test(c.next_amount_from)) throw new Error('Das Gültig-ab-Datum ist ungültig.');
   if (c.term_months != null && (!Number.isInteger(c.term_months) || c.term_months < 1 || c.term_months > 120)) throw new Error('Die Laufzeit muss zwischen 1 und 120 Monaten liegen.');
   const months = c.due_months?.length ? normalizeMonths(c.interval, c.due_months).join(',') : null;
   const t = now();
@@ -96,13 +104,14 @@ export function saveContract(b: Book, c: ContractInput): string {
     name, name, c.person ?? null, c.purpose ?? null, c.kind ?? null, c.category_id ?? null, c.account_id ?? null, c.amount, c.interval,
     c.due_day ?? null, months, c.payment_method ?? null, c.note ?? null, c.start_date ?? null, c.end_date ?? null,
     c.notice_period ?? null, c.doc_ref ?? null, c.advisor ?? null, c.death_action ?? null,
-    c.term_months ?? null, c.customer_no?.trim() || null, c.address?.trim() || null, c.status ?? 'confirmed', t,
+    c.term_months ?? null, c.customer_no?.trim() || null, c.address?.trim() || null, c.next_amount ?? null, c.next_amount_from || null,
+    c.status ?? 'confirmed', t,
   ];
   if (c.id) {
     b.run(
       `update recurring set name=?, payee=?, person=?, purpose=?, kind=?, category_id=?, account_id=?, amount=?, interval=?, due_day=?, due_months=?,
        payment_method=?, note=?, start_date=?, end_date=?, notice_period=?, doc_ref=?, advisor=?, death_action=?,
-       term_months=?, customer_no=?, address=?, status=?, updated_at=? where id=?`,
+       term_months=?, customer_no=?, address=?, next_amount=?, next_amount_from=?, status=?, updated_at=? where id=?`,
       [...vals, c.id],
     );
     return c.id;
@@ -111,8 +120,8 @@ export function saveContract(b: Book, c: ContractInput): string {
   b.run(
     `insert into recurring (name, payee, person, purpose, kind, category_id, account_id, amount, interval, due_day, due_months,
       payment_method, note, start_date, end_date, notice_period, doc_ref, advisor, death_action, term_months, customer_no, address,
-      status, updated_at, id, created_at)
-      values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      next_amount, next_amount_from, status, updated_at, id, created_at)
+      values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [...vals, id, t],
   );
   return id;
@@ -122,12 +131,36 @@ export function deleteContract(b: Book, id: string) {
   b.run('delete from recurring where id = ?', [id]);
 }
 
-export function perMonth(c: Pick<Contract, 'amount' | 'interval'>): number {
-  return Math.round((c.amount * PER_YEAR[c.interval]) / 12);
+type Priced = Pick<Contract, 'amount' | 'interval'> & Partial<Pick<Contract, 'next_amount' | 'next_amount_from'>>;
+
+/** Betrag des Vertrags an einem Tag: ab dem Gültig-ab-Datum der angekündigte neue Betrag, vorher der jetzige. */
+export function amountAt(c: Omit<Priced, 'interval'>, date: string): number {
+  return c.next_amount != null && c.next_amount_from && date >= c.next_amount_from ? c.next_amount : c.amount;
 }
 
-export function perYear(c: Pick<Contract, 'amount' | 'interval'>): number {
-  return c.amount * PER_YEAR[c.interval];
+/** Monatliche Belastung; mit `at` (Tag oder Monat JJJJ-MM) zum dann gültigen Betrag. */
+export function perMonth(c: Priced, at?: string): number {
+  const a = at ? amountAt(c, at.length === 7 ? `${at}-31` : at) : c.amount;
+  return Math.round((a * PER_YEAR[c.interval]) / 12);
+}
+
+export function perYear(c: Priced, at?: string): number {
+  return (at ? amountAt(c, at) : c.amount) * PER_YEAR[c.interval];
+}
+
+export interface PriceHistoryRow { id: string; recurring_id: string; valid_from: string; amount: number; previous: number | null }
+
+/** Frühere Beitragsänderungen eines Vertrags, neueste zuerst. */
+export function priceHistory(b: Book, id: string): PriceHistoryRow[] {
+  return b.all<PriceHistoryRow>('select id, recurring_id, valid_from, amount, previous from recurring_prices where recurring_id = ? order by valid_from desc', [id]);
+}
+
+/** Angekündigte (noch nicht gültige) Beitragsänderungen. */
+export function announcedPriceChanges(contracts: Contract[]): { contract: Contract; from: string; amount: number; perYear: number }[] {
+  return contracts
+    .filter((c) => c.status === 'confirmed' && c.next_amount != null && c.next_amount_from)
+    .map((c) => ({ contract: c, from: c.next_amount_from!, amount: c.next_amount!, perYear: (c.next_amount! - c.amount) * PER_YEAR[c.interval] }))
+    .sort((a, b) => a.from.localeCompare(b.from));
 }
 
 /** Ergänzt Fälligkeitsmonate: bei vierteljährlich mit nur einem Monat werden die drei weiteren abgeleitet usw. */
