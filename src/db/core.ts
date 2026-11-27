@@ -1,9 +1,9 @@
 import type { Database, SqlJsStatic, SqlValue } from 'sql.js';
 import schema from './schema.sql?raw';
 import { seedDefaults } from './seed';
-import { now } from '../lib/id';
+import { now, uid } from '../lib/id';
 
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 /** Migrationen von Version n-1 auf n. Neue Bücher starten mit schema.sql (Version 1) und durchlaufen alle Migrationen. */
 const MIGRATIONS: Record<number, string> = {
@@ -156,7 +156,36 @@ const MIGRATIONS: Record<number, string> = {
     );
     create index idx_collection_links_tx on collection_links(transaction_id);
   `,
+  9: `
+    alter table recurring add column next_amount integer;
+    alter table recurring add column next_amount_from text;
+    create table recurring_prices (
+      id text primary key,
+      recurring_id text not null references recurring(id) on delete cascade,
+      valid_from text not null,
+      amount integer not null,
+      previous integer,
+      created_at text not null
+    );
+    create index idx_recurring_prices on recurring_prices(recurring_id, valid_from);
+  `,
 };
+
+/** Angekündigte Beitragsänderungen, deren Gültig-ab-Datum erreicht ist, in den Vertrag übernehmen (mit Eintrag in der Preis-Historie). */
+export function applyDuePriceChanges(book: Book, day = new Date().toISOString().slice(0, 10)): number {
+  const due = book.all<{ id: string; amount: number; next_amount: number; next_amount_from: string }>(
+    'select id, amount, next_amount, next_amount_from from recurring where next_amount is not null and next_amount_from is not null and next_amount_from <= ?', [day]);
+  if (!due.length) return 0;
+  const t = now();
+  book.tx(() => {
+    for (const r of due) {
+      book.run('insert into recurring_prices (id, recurring_id, valid_from, amount, previous, created_at) values (?,?,?,?,?,?)',
+        [uid(), r.id, r.next_amount_from, r.next_amount, r.amount, t]);
+      book.run('update recurring set amount = next_amount, next_amount = null, next_amount_from = null, updated_at = ? where id = ?', [t, r.id]);
+    }
+  });
+  return due.length;
+}
 
 function migrate(book: Book, from: number) {
   for (let v = from + 1; v <= SCHEMA_VERSION; v++) {
@@ -290,5 +319,6 @@ export function openBook(SQL: SqlJsStatic, data: Uint8Array): Book {
   if (!v) throw new Error('Die Datei ist kein Haushaltskompass-Haushaltsbuch.');
   if (v > SCHEMA_VERSION) throw new Error('Diese Datei stammt aus einer neueren Version des Programms.');
   if (v < SCHEMA_VERSION) migrate(book, v);
+  applyDuePriceChanges(book);
   return book;
 }

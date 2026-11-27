@@ -1,6 +1,6 @@
 import type { Book } from './core';
 import type { Contract } from './contracts';
-import { listContracts } from './contracts';
+import { listContracts, amountAt } from './contracts';
 import { today, ymd, addMonths } from '../lib/dates';
 
 /**
@@ -135,7 +135,9 @@ export function plannedTransactions(b: Book, accountId: string, until: string, n
       if (months && !months.includes(Number(m.slice(5, 7)))) continue;
       const d = dateIn(m, day);
       if (d > until || (c.start_date && d < c.start_date) || (c.end_date && d > c.end_date)) continue;
-      emit({ date: d, amount, payee: c.name || c.payee, category_id: c.category_id ?? last?.category_id ?? null, transfer: false, source: 'contract',
+      // angekündigte Beitragsänderung ab Gültig-ab (nur wenn die letzte Zahlung davor lag)
+      const amt = c.next_amount != null && c.next_amount_from && d >= c.next_amount_from && (!last || last.date < c.next_amount_from) ? amountAt(c, d) : amount;
+      emit({ date: d, amount: amt, payee: c.name || c.payee, category_id: c.category_id ?? last?.category_id ?? null, transfer: false, source: 'contract',
         label: `Vertrag: ${c.name || c.payee}` }, match, months ? 20 : 12);
     } });
   }

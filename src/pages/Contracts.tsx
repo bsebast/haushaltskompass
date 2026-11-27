@@ -6,7 +6,7 @@ import AmountInput from '../components/AmountInput';
 import CategorySelect from '../components/CategorySelect';
 import { listAccounts } from '../db/repo';
 import {
-  listContracts, saveContract, deleteContract, perMonth, perYear, nextDue, upcoming, INTERVALS,
+  listContracts, saveContract, deleteContract, perMonth, perYear, nextDue, upcoming, INTERVALS, amountAt, announcedPriceChanges, priceHistory,
   parseContractsCsv, commitContracts, parseDue, type Contract, type Interval, type ImportRow,
 } from '../db/contracts';
 import { formatDate } from '../lib/dates';
@@ -42,6 +42,7 @@ export default function Contracts() {
   const monthly = active.reduce((a, c) => a + perMonth(c), 0);
   const yearly = active.reduce((a, c) => a + perYear(c), 0);
   const soon = upcoming(active, 30);
+  const announced = announcedPriceChanges(active);
   const byKind = useMemo(() => {
     const m = new Map<string, number>();
     active.forEach((c) => m.set(c.kind ?? 'Ohne Art', (m.get(c.kind ?? 'Ohne Art') ?? 0) + perMonth(c)));
@@ -66,7 +67,7 @@ export default function Contracts() {
             <div className="card p-5"><div className="text-xs text-text-muted">Fixkosten pro Monat (Ø)</div><div className="text-xl font-semibold mt-1"><Money cents={monthly} /></div></div>
             <div className="card p-5"><div className="text-xs text-text-muted">Pro Jahr</div><div className="text-xl font-semibold mt-1"><Money cents={yearly} /></div></div>
             <div className="card p-5"><div className="text-xs text-text-muted">Aktive Verträge</div><div className="text-xl font-semibold mt-1">{active.length}</div></div>
-            <div className="card p-5"><div className="text-xs text-text-muted">Fällig in 30 Tagen</div><div className="text-xl font-semibold mt-1"><Money cents={soon.reduce((a, s) => a + s.contract.amount, 0)} /></div></div>
+            <div className="card p-5"><div className="text-xs text-text-muted">Fällig in 30 Tagen</div><div className="text-xl font-semibold mt-1"><Money cents={soon.reduce((a, s) => a + amountAt(s.contract, s.date), 0)} /></div></div>
           </div>
 
           {suggestions.length > 0 && (
@@ -136,7 +137,10 @@ export default function Contracts() {
                           </td>
                           <td className="px-2 py-2 whitespace-nowrap">{c.person ?? '–'}</td>
                           <td className="px-2 py-2 whitespace-nowrap">{c.category_name ? <span className="inline-flex items-center gap-1.5"><Dot color={c.category_color} />{c.category_name}</span> : <span className="text-text-muted">–</span>}</td>
-                          <td className="px-2 py-2 text-right"><Money cents={c.amount} /></td>
+                          <td className="px-2 py-2 text-right">
+                            <Money cents={c.amount} />
+                            {c.next_amount != null && c.next_amount_from && <div className="text-xs text-warning whitespace-nowrap">ab {formatDate(c.next_amount_from)}: {formatCents(c.next_amount)}</div>}
+                          </td>
                           <td className="px-2 py-2 whitespace-nowrap">{INTERVALS[c.interval]}</td>
                           <td className="px-2 py-2 whitespace-nowrap tabular-nums">{c.status === 'ended' ? 'beendet' : nd ? formatDate(nd) : '–'}</td>
                           <td className="px-2 py-2 text-right text-text-muted"><Money cents={perMonth(c)} colored={false} /></td>
@@ -180,6 +184,26 @@ export default function Contracts() {
                   <p className="text-xs text-text-muted mt-2">Spätester Eingang beim Anbieter, sonst verlängert sich der Vertrag.</p>
                 </section>
               )}
+              {announced.length > 0 && (
+                <section className="card p-5">
+                  <h2 className="text-sm font-semibold mb-3">Angekündigte Beitragsänderungen</h2>
+                  <ul className="space-y-3 text-sm">
+                    {announced.map((x) => (
+                      <li key={x.contract.id}>
+                        <div className="flex gap-2 items-center">
+                          {x.perYear < 0 ? <TrendingUp size={14} className="text-danger shrink-0" aria-label="teurer" /> : <TrendingDown size={14} className="text-success shrink-0" aria-label="günstiger" />}
+                          <span className="flex-1 truncate font-medium">{x.contract.name}{x.contract.purpose ? ` · ${x.contract.purpose}` : ''}</span>
+                        </div>
+                        <div className="text-xs text-text-muted ml-5">
+                          {formatCents(x.contract.amount)} → {formatCents(x.amount)} ab {formatDate(x.from)} · {x.perYear < 0 ? 'teurer' : 'günstiger'} um {formatCents(Math.abs(x.perYear))} im Jahr
+                        </div>
+                        {x.perYear < 0 && <div className="ml-5 text-xs mt-0.5"><button className="text-accent hover:underline" onClick={() => setLetter(x.contract)}>Sonderkündigung</button></div>}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-text-muted mt-2">Der neue Betrag wird zum Stichtag automatisch übernommen und zählt in Prognose und Monatsbilanz schon ab dann.</p>
+                </section>
+              )}
               {changes.length > 0 && (
                 <section className="card p-5">
                   <h2 className="text-sm font-semibold mb-3">Preisänderungen (letzte 6 Monate)</h2>
@@ -210,7 +234,7 @@ export default function Contracts() {
                       <li key={c.id} className="flex gap-2">
                         <span className="tabular-nums text-text-muted w-20 shrink-0">{formatDate(date)}</span>
                         <span className="flex-1 truncate">{c.name}{c.person ? ` (${c.person})` : ''}</span>
-                        <Money cents={c.amount} />
+                        <Money cents={amountAt(c, date)} />
                       </li>
                     ))}
                   </ul>
@@ -261,6 +285,9 @@ function ContractDialog({ contract: c, onClose, kinds, persons }: { contract: Co
   const [end, setEnd] = useState(c?.end_date ?? '');
   const [customerNo, setCustomerNo] = useState(c?.customer_no ?? '');
   const [address, setAddress] = useState(c?.address ?? '');
+  const [nextAmount, setNextAmount] = useState<number | null>(c?.next_amount != null ? Math.abs(c.next_amount) : null);
+  const [nextFrom, setNextFrom] = useState(c?.next_amount_from ?? '');
+  const history = useQuery((b) => (c ? priceHistory(b, c.id) : []), [c?.id]);
   const [error, setError] = useState<string | null>(null);
 
   const save = () => {
@@ -272,6 +299,7 @@ function ContractDialog({ contract: c, onClose, kinds, persons }: { contract: Co
         due_day: d.day, due_months: d.months, category_id: category, account_id: account || null, payment_method: payment || null,
         note: note || null, notice_period: notice || null, doc_ref: docRef || null, advisor: advisor || null, death_action: deathAction || null,
         start_date: start || null, term_months: term ? Number(term) : null, customer_no: customerNo || null, address: address || null,
+        next_amount: nextAmount ? (income ? 1 : -1) * nextAmount : null, next_amount_from: nextAmount ? nextFrom || null : null,
         status: ended ? 'ended' : 'confirmed', end_date: end || (ended ? new Date().toISOString().slice(0, 10) : null),
       });
       onClose();
@@ -302,6 +330,14 @@ function ContractDialog({ contract: c, onClose, kinds, persons }: { contract: Co
           </Field>
           <Field label="Fälligkeit" hint="z. B. 01. oder 15.02., 15.05."><input className="input" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
         </div>
+        <div className="grid sm:grid-cols-3 gap-3 items-end">
+          <Field label="Neuer Betrag" hint="angekündigte Beitragsänderung"><AmountInput value={nextAmount} onChange={setNextAmount} /></Field>
+          <Field label="gültig ab"><input type="date" className="input" value={nextFrom} onChange={(e) => setNextFrom(e.target.value)} /></Field>
+          {nextAmount != null && <button type="button" className="btn-ghost text-sm justify-self-start" onClick={() => { setNextAmount(null); setNextFrom(''); }}>Änderung entfernen</button>}
+        </div>
+        {history.length > 0 && (
+          <div className="text-xs text-text-muted">Frühere Beitragsänderungen: {history.map((h) => `${formatDate(h.valid_from)} ${h.previous != null ? `${formatCents(Math.abs(h.previous))} → ` : ''}${formatCents(Math.abs(h.amount))}`).join(' · ')}</div>
+        )}
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={income} onChange={(e) => setIncome(e.target.checked)} /> Regelmäßige Einnahme (z. B. Kindergeld)</label>
         <div className="grid sm:grid-cols-3 gap-3">
           <Field label="Kategorie"><CategorySelect value={category} onChange={setCategory} kind={income ? 'income' : 'expense'} /></Field>
